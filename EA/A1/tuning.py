@@ -8,7 +8,6 @@ from ioh import get_problem, logger, ProblemClass
 from GA import studentnumber1_studentnumber2_GA, GA_1, create_problem
 from skopt import gp_minimize
 budget = 1000000
-
 # To make your results reproducible (not required by the assignment), you could set the random seed by
 # `np.random.seed(some integer, e.g., 42)`
 
