@@ -1,3 +1,4 @@
+"""
 import gym
 import torch
 import torch.nn as nn
@@ -20,7 +21,7 @@ def run_reinforce():
     gamma = 0.99
     lr = 0.001
     hidden_dim = 32
-    max_episodes = 500
+    max_episodes = 2000
 
     class PolicyNetwork(nn.Module):
         def __init__(self):
@@ -92,7 +93,7 @@ def run_ac():
     lr_actor = 0.0003
     lr_critic = 0.003
     hidden_dim = 64
-    max_episodes = 500
+    max_episodes = 2000
     clip_grad = 0.5
     entropy_coef = 0.01
 
@@ -201,7 +202,7 @@ def run_a2c():
     lr_actor = 0.0003
     lr_critic = 0.0003
     hidden_dim = 128
-    max_episodes = 500
+    max_episodes = 2000
     entropy_coef = 0.01
     clip_grad = 1.0
     n_steps = 5
@@ -356,3 +357,88 @@ def run_all():
 
 if __name__ == "__main__":
     run_all()
+
+"""
+# ================== environment steps 实现 ==================
+import numpy as np
+import matplotlib.pyplot as plt
+from concurrent.futures import ThreadPoolExecutor
+from a2c import run_a2c
+from Ac import AC
+from reinforce import run_reinforce
+
+
+def run_all_algorithms():
+    # 并行运行三个算法并获取分数和步数
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        future_reinforce = executor.submit(run_reinforce)
+        future_ac = executor.submit(AC)
+        future_a2c = executor.submit(run_a2c)
+
+        # 获取结果 (假设每个函数现在返回 (scores, steps_per_episode))
+        reinforce_scores, reinforce_steps = future_reinforce.result()
+        ac_scores, ac_steps = future_ac.result()
+        a2c_scores, a2c_steps = future_a2c.result()
+
+    # 计算累计步数
+    reinforce_cumsteps = np.cumsum(reinforce_steps)
+    ac_cumsteps = np.cumsum(ac_steps)
+    a2c_cumsteps = np.cumsum(a2c_steps)
+
+    # 找到最短的步数范围
+    min_steps = min(reinforce_cumsteps[-1], ac_cumsteps[-1], a2c_cumsteps[-1])
+
+    # 插值函数，用于将不同步数的数据对齐到相同步数网格
+    def interpolate_to_common_steps(scores, cumsteps, common_steps, scipy=None):
+        from scipy.interpolate import interp1d
+        f = interp1d(cumsteps, scores, kind='nearest', fill_value="extrapolate")
+        return f(common_steps)
+
+    # 创建公共步数网格
+    common_steps = np.linspace(0, min_steps, num=1000)
+
+    # 插值所有算法的分数到公共步数网格
+    reinforce_interp = interpolate_to_common_steps(reinforce_scores, reinforce_cumsteps, common_steps)
+    ac_interp = interpolate_to_common_steps(ac_scores, ac_cumsteps, common_steps)
+    a2c_interp = interpolate_to_common_steps(a2c_scores, a2c_cumsteps, common_steps)
+    # 绘制结果
+    plt.figure(figsize=(12, 6))
+    # 绘制原始分数曲线
+    plt.plot(common_steps, reinforce_interp, alpha=0.3, color='blue', label='REINFORCE')
+    plt.plot(common_steps, ac_interp, alpha=0.3, color='green', label='Actor-Critic')
+    plt.plot(common_steps, a2c_interp, alpha=0.3, color='red', label='A2C')
+
+    # 计算并绘制滑动平均（窗口大小=100步）
+    window_size = 100
+    if len(common_steps) > window_size:
+        # 计算滑动平均
+        def moving_average(x, w):
+            return np.convolve(x, np.ones(w), 'valid') / w
+
+        # 计算滑动平均和对应的步数位置
+        reinforce_ma = moving_average(reinforce_interp, window_size)
+        ac_ma = moving_average(ac_interp, window_size)
+        a2c_ma = moving_average(a2c_interp, window_size)
+        steps_ma = common_steps[window_size // 2: window_size // 2 + len(reinforce_ma)]
+
+        # 绘制滑动平均曲线
+        plt.plot(steps_ma, reinforce_ma, 'b-', linewidth=2, label='REINFORCE Avg')
+        plt.plot(steps_ma, ac_ma, 'g-', linewidth=2, label='AC Avg')
+        plt.plot(steps_ma, a2c_ma, 'r-', linewidth=2, label='A2C Avg')
+
+    # 添加标签和标题
+    plt.xlabel('Environment Steps', fontsize=12)
+    plt.ylabel('Episode Score', fontsize=12)
+    plt.title('Policy Gradient Algorithms Comparison (by Environment Steps)', fontsize=14)
+
+    # 添加网格和图例
+    plt.grid(True, linestyle='--', alpha=0.6)
+    plt.legend(fontsize=10)
+
+    # 自动调整布局并显示
+    plt.tight_layout()
+    plt.show()
+
+
+if __name__ == "__main__":
+    run_all_algorithms()
