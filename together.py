@@ -330,7 +330,7 @@ def run_all():
     reinforce_scores = reinforce_scores[:min_len]
     ac_scores = ac_scores[:min_len]
     a2c_scores = a2c_scores[:min_len]
-
+# 111
     # 绘制结果
     plt.figure(figsize=(12, 6))
     plt.plot(reinforce_scores, alpha=0.6, label='REINFORCE')
