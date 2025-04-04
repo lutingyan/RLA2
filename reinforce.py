@@ -120,7 +120,7 @@ action_dim = env.action_space.n
 # 超参数
 gamma = 0.99
 lr = 0.001
-hidden_dim = 32
+hidden_dim = 128
 max_episodes = 2000
 
 
