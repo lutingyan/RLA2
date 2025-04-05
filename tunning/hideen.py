@@ -116,8 +116,8 @@ if __name__ == "__main__":
         dfs.append(df)
 
     final_df = pd.concat(dfs)
-    os.makedirs('../results', exist_ok=True)
-    csv_path = 'results/reinforce_hidden_dim_results.csv'
+    #os.makedirs('../results', exist_ok=True)
+    csv_path = '../results/reinforce_hidden_dim_results.csv'
     final_df.to_csv(csv_path, index=False)
 
     print(f"\nResults saved to {csv_path}")

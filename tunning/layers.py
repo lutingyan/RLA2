@@ -104,7 +104,6 @@ if __name__ == "__main__":
         cumulative_steps = np.cumsum(all_steps_per_episode[0])
 
         df = pd.DataFrame({
-            'learning_rate': [f"{learning_rate:.0e}"] * len(average_per_step),
             'num_fc_layers': [num_fc_layers] * len(average_per_step),
             'episode': np.arange(len(average_per_step)),
             'average_reward': average_per_step,
@@ -116,7 +115,7 @@ if __name__ == "__main__":
     final_df = pd.concat(results, ignore_index=True)
 
     os.makedirs('../results', exist_ok=True)
-    csv_path = 'results/reinforce_fc_layer_ablation_fixed_lr.csv'
+    csv_path = '../results/reinforce_fc_layer_ablation_fixed_lr.csv'
     final_df.to_csv(csv_path, index=False)
     print(f"\nResults saved to {csv_path}")
 
