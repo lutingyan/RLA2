@@ -103,6 +103,8 @@ if __name__ == "__main__":
     plt.show()
 
 '''
+from cProfile import label
+
 # ================== environment steps 实现 ==================
 import gymnasium as gym
 import numpy as np
@@ -158,7 +160,7 @@ def run_reinforce():
             'rewards': []
         }
         done = False
-        steps = 0 
+        steps = 0
 
         while not done:
             action, log_prob = policy.act(state)
@@ -214,6 +216,5 @@ if __name__ == "__main__":
     std_per_step = np.nanstd(all_scores, axis=0)
 
     cumulative_steps = np.cumsum(all_steps_per_episode[0])
-
-    utils.plot(average_per_step, cumulative_steps, std_per_step)
-
+#111
+    utils.plot(average_per_step, cumulative_steps, std_per_step,label='Reinforce')
