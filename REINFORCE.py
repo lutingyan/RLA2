@@ -119,7 +119,7 @@ action_dim = env.action_space.n
 
 
 gamma = 0.99
-lr = 0.001
+lr = 1e-4
 hidden_dim = 128
 max_episodes = 2000
 NUM_RUNS = 5
@@ -127,12 +127,15 @@ NUM_RUNS = 5
 class PolicyNetwork(nn.Module):
     def __init__(self, state_dim, action_dim, hidden_dim):
         super().__init__()
+        # 2 hidden layers
         self.fc1 = nn.Linear(state_dim, hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, action_dim)
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        self.fc3 = nn.Linear(hidden_dim, action_dim)
 
     def forward(self, x):
         x = F.relu(self.fc1(x))
-        return F.softmax(self.fc2(x), dim=-1)
+        x = F.relu(self.fc2(x))
+        return F.softmax(self.fc3(x), dim=-1)
 
     def act(self, state):
         state = torch.FloatTensor(np.array(state)).unsqueeze(0)
