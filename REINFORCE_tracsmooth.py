@@ -81,7 +81,7 @@ def run_reinforce(seed=0):
         all_returns.append(returns)
 
         # 对奖励进行标准化
-        returns = (returns - returns.mean()) / (returns.std() + 1e-7)
+        # returns = (returns - returns.mean()) / (returns.std() + 1e-7)
 
         # 对奖励进行平滑
         smoothed_returns = pd.Series(returns.numpy()).rolling(window=50, min_periods=1).mean()
