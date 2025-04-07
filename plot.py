@@ -40,38 +40,39 @@ def plot_from_csv(csv_path, rolling_window=100):
     # 读取CSV文件
     df = pd.read_csv(csv_path)
 
-    # 获取所有不同的学习率
-    gammas = df['gamma'].unique()
+    # 获取所有不同的参数（第一列的唯一值）
+    parameter_column = df.columns[0]
+    parameters = df[parameter_column].unique()
 
-    # 设置颜色映射（可根据学习率个数扩展）
+    # 设置颜色映射（可根据参数个数扩展）
     colors = ['red', 'green', 'blue']
 
     plt.figure(figsize=(12, 6))
 
-    for i, lr in enumerate(gammas):
-        # 筛选当前学习率的数据
-        lr_data = df[df['gamma'] == lr]
+    for i, parameter in enumerate(parameters):
+        # 筛选当前参数的数据
+        parameter_data = df[df[parameter_column] == parameter]
         # 计算滚动平均和标准差
-        reward_rolling = lr_data['avg_reward'].rolling(rolling_window, min_periods=1).mean()
-        std_rolling = lr_data['std_reward'].rolling(rolling_window, min_periods=1).mean()
+        reward_rolling = parameter_data['avg_reward'].rolling(rolling_window, min_periods=1).mean()
+        std_rolling = parameter_data['std_reward'].rolling(rolling_window, min_periods=1).mean()
 
         # 绘制曲线（以 episode 为横坐标）
-        plt.plot(lr_data['episode'], reward_rolling,
-                 linewidth=2, label=f"LR={lr} (Smoothed)", color=colors[i])
+        plt.plot(parameter_data['episode'], reward_rolling,
+                 linewidth=2, label=f"{parameter_column}={parameter} (Smoothed)", color=colors[i])
 
         # 绘制标准差区域
-        plt.fill_between(lr_data['episode'],
+        plt.fill_between(parameter_data['episode'],
                          reward_rolling - std_rolling,
                          reward_rolling + std_rolling,
-                         color=colors[i], alpha=0.1, label=f"LR={lr} (Std Dev)")
+                         color=colors[i], alpha=0.1, label=f"{parameter_column}={parameter} (Std Dev)")
 
     plt.xlabel("Episode")
     plt.ylabel("Reward")
-    plt.title("REINFORCE Performance by Learning Rate")
-    plt.legend()
+    plt.title("REINFORCE Performance by Parameter")
+    plt.legend(loc='best')
     plt.grid(True)
     plt.tight_layout()
     plt.show()
 
-# plot_from_csv('results/reinforce_gamma_results.csv', rolling_window=50)
+plot_from_csv('results/reinforce_gamma_results.csv', rolling_window=50)
 # plot_from_npy('results/TN_ER_softupdate_decay.npy', rolling_window=50)
