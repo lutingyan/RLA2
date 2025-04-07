@@ -15,7 +15,7 @@ action_dim = env.action_space.n
 fixed_lr = 1e-4
 gamma = 0.99
 hidden_dims = [[32, 32], [64, 64], [128, 128], [64, 64, 64]]
-max_episodes = 200
+max_episodes = 2000
 NUM_RUNS = 5
 
 
