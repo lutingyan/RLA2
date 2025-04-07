@@ -126,7 +126,7 @@ if __name__ == "__main__":
     })
 
     os.makedirs('./results', exist_ok=True)
-    csv_path = './results/reinforce_gamma_results.csv'
+    csv_path = './results/reinforce_minibatch_results.csv'
     df.to_csv(csv_path, index=False)
 
     print(f"\nResults saved to {csv_path}")
