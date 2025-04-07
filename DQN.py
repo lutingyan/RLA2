@@ -1,158 +1,129 @@
-import gym
+import time, random
+import gymnasium as gym
 import numpy as np
-import torch
-import torch.nn as nn
-import torch.optim as optim
-import random
-import matplotlib.pyplot as plt
-import os
-from collections import deque
+import tensorflow as tf
+import utils
+from collections import deque, namedtuple
 
-# Create a folder to save learning curve plots
-save_dir = "learning_curves"
-os.makedirs(save_dir, exist_ok=True)
+from tensorflow.keras import Sequential
+from tensorflow.keras.layers import Dense, Input
+from tensorflow.keras.losses import MSE
+from tensorflow.keras.optimizers import Adam
 
-# Experience replay buffer
-class ReplayBuffer:
-    def __init__(self, capacity=10000):
-        self.buffer = deque(maxlen=capacity)
-    def push(self, state, action, reward, next_state, done):
-        self.buffer.append((state, action, reward, next_state, done))
-    def sample(self, batch_size):
-        batch = random.sample(self.buffer, batch_size)
-        state, action, reward, next_state, done = zip(*batch)
-        return (
-            torch.FloatTensor(state),
-            torch.LongTensor(action),
-            torch.FloatTensor(reward),
-            torch.FloatTensor(next_state),
-            torch.FloatTensor(done),
-        )
-    def size(self):
-        return len(self.buffer)
+# ********* hyperparameter
+BUFFER_SIZE = 100_000
+GAMMA = 0.99
+ALPHA = 1e-4
+STEPS_FOR_UPDATE = 2
+EPSILON = 0.4
 
-# Define Q-network
-class QNetwork(nn.Module):
-    def __init__(self, state_dim, action_dim, hidden_size=128, num_layers=2):
-        super(QNetwork, self).__init__()
-        layers = []
-        input_dim = state_dim
-        for _ in range(num_layers):
-            layers.append(nn.Linear(input_dim, hidden_size))
-            layers.append(nn.ReLU())
-            input_dim = hidden_size
-        layers.append(nn.Linear(input_dim, action_dim))
-        self.network = nn.Sequential(*layers)
-    def forward(self, x):
-        return self.network(x)
+TOTAL_STEPS = 1_000_000 
+NUM_RUNS = 5
 
-# Define DQN agent
-class DQNAgent:
-    def __init__(self, state_dim, action_dim, learning_rate=5e-4, gamma=0.98, epsilon=1.0, epsilon_min=0.05,
-                 epsilon_decay=0.999, hidden_size=128, num_layers=2, use_target_network=True, target_update_freq=200):
-        self.state_dim = state_dim
-        self.action_dim = action_dim
-        self.gamma = gamma
-        self.epsilon = epsilon
-        self.epsilon_min = epsilon_min
-        self.epsilon_decay = epsilon_decay
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.q_network = QNetwork(state_dim, action_dim, hidden_size, num_layers).to(self.device)
-        self.optimizer = optim.Adam(self.q_network.parameters(), lr=learning_rate)
-        self.criterion = nn.MSELoss()
-        self.use_target_network = use_target_network
-        self.batch_size = 64  # Batch size for experience replay
-        self.memory = ReplayBuffer(10000)  # Experience replay buffer
+env = gym.make("CartPole-v1")
+MAX_TIMESTEPS = env.spec.max_episode_steps
+NUM_EPISODES = TOTAL_STEPS // MAX_TIMESTEPS
 
-        if use_target_network:
-            self.target_network = QNetwork(state_dim, action_dim, hidden_size, num_layers).to(self.device)
-            self.target_network.load_state_dict(self.q_network.state_dict())
-            self.target_network.eval()
-    def select_action(self, state):
-        if random.random() < self.epsilon:
-            return np.random.randint(self.action_dim)
-        state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-        with torch.no_grad():
-            return torch.argmax(self.q_network(state_tensor)).item()
-    def update(self):
-        if self.memory.size() < self.batch_size:
-            return
-        state, action, reward, next_state, done = self.memory.sample(self.batch_size)
-        state, action, reward, next_state, done = (
-            state.to(self.device),
-            action.to(self.device),
-            reward.to(self.device),
-            next_state.to(self.device),
-            done.to(self.device),
-        )
-        q_values = self.q_network(state).gather(1, action.unsqueeze(1)).squeeze(1)
-        # **Use Double DQN to compute target Q values**
-        with torch.no_grad():
-            next_action = self.q_network(next_state).argmax(dim=1, keepdim=True)
-            next_q_value = self.target_network(next_state).gather(1, next_action).squeeze(1)
-            target_q_values = reward + (1 - done) * self.gamma * next_q_value
-        loss = self.criterion(q_values, target_q_values)
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
-        # Decay epsilon
-        self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
-    def update_target_network(self):
-        if self.use_target_network:
-            self.target_network.load_state_dict(self.q_network.state_dict())
-# Train the agent
-def train_agent(num_episodes=2000, target_update_freq=200):
-    env = gym.make("CartPole-v1")
-    state_dim = env.observation_space.shape[0]
-    action_dim = env.action_space.n
-    agent = DQNAgent(state_dim, action_dim, use_target_network=True, target_update_freq=target_update_freq)
-    total_steps = 0
-    rewards = []
-    for episode in range(num_episodes):
-        state, _ = env.reset()
-        episode_reward = 0
-        done = False
-        while not done:
-            action = agent.select_action(state)
+state_size = env.observation_space.shape  # (4,)
+num_actions = env.action_space.n  # 2 (left, right)
+
+returns_per_episode = np.zeros((NUM_RUNS, NUM_EPISODES))  
+all_returns_per_step = []  
+
+for run in range(NUM_RUNS):
+    random.seed(run)
+    np.random.seed(run)
+    tf.random.set_seed(run)
+    print(f"\nRunning {run+1}...\n")
+
+    Experience = namedtuple("Experience", field_names=["state", "action", "reward", "next_state", "done"])
+    memory_buffer = deque(maxlen=BUFFER_SIZE)
+
+    q_network = Sequential([
+        Input(shape=state_size),
+        Dense(units=128, activation='relu'),
+        Dense(units=128, activation='relu'),
+        Dense(units=num_actions, activation='linear'),
+    ])
+    
+    target_q_network = Sequential([
+        Input(shape=state_size),
+        Dense(units=128, activation='relu'),
+        Dense(units=128, activation='relu'),
+        Dense(units=num_actions, activation='linear'),
+    ])
+    optimizer = Adam(learning_rate=ALPHA)
+    target_q_network.set_weights(q_network.get_weights()) 
+
+    @tf.function
+    def nn_update(experiences, gamma, optimizer):
+        with tf.GradientTape() as tape:
+            loss = compute_loss(experiences, gamma)
+        gradients = tape.gradient(loss, q_network.trainable_variables)
+        optimizer.apply_gradients(zip(gradients, q_network.trainable_variables))
+
+    def compute_loss(experiences, gamma):
+        states, actions, rewards, next_states, dones = experiences
+        max_qsa = tf.reduce_max(target_q_network(next_states), axis=-1)
+        y_targets = rewards + (gamma * max_qsa * (1 - dones))         
+        q_values = q_network(states)
+        q_values = tf.gather_nd(q_values, tf.stack([tf.range(q_values.shape[0]),
+                                                        tf.cast(actions, tf.int32)], axis=1))
+        loss = MSE(y_targets, q_values)
+        return loss
+
+    total_steps = 0  
+    epsilon = EPSILON
+    per_step_returns = [] 
+    start_time = time.time()
+    
+    for episode in range(NUM_EPISODES):
+        state, _ = env.reset(seed=run)
+        episodic_return = 0
+        total_points = 0
+
+        for t in range(MAX_TIMESTEPS):
+            state_qn = tf.convert_to_tensor(state, dtype=tf.float32)[None, :]
+            q_values = q_network(state_qn)
+            action = utils.get_action(q_values, epsilon)
+
             next_state, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
-            agent.memory.push(state, action, reward, next_state, done)
-            agent.update()
-            state = next_state
-            episode_reward += reward
-            total_steps += 1  # Cumulative steps
-        rewards.append((total_steps, episode_reward))
-        if (episode + 1) % target_update_freq == 0:
-            agent.update_target_network()
-        if episode % 100 == 0:
-            print(f"Episode {episode}: Total Steps = {total_steps}, Reward = {episode_reward}")
+            total_steps += 1
+            total_points += reward
 
-    env.close()
-    return rewards
+            memory_buffer.append(Experience(state, action, reward, next_state, done))
+            if utils.check_update_conditions(t, STEPS_FOR_UPDATE, memory_buffer):
+                experiences = utils.get_experiences(memory_buffer)
+                nn_update(experiences, GAMMA, optimizer)
+                utils.update_target_network(q_network, target_q_network, softupdate=True)
+            state = next_state.copy()
+            if done:
+                break
+        per_step_returns.append(total_points)        
+        returns_per_episode[run, episode] = total_points  
 
-# Run the experiment and save learning curves
-def run_experiment():
-    rewards = train_agent(num_episodes=2000)
-    # Unpack steps and rewards
-    total_steps, episode_rewards = zip(*rewards)
-    # Choose smoothing method
-    def moving_average(data, window_size=50):
-        return np.convolve(data, np.ones(window_size) / window_size, mode='valid')
-    window_size = 50
-    smoothed_rewards = moving_average(episode_rewards, window_size)
-    smoothed_steps = total_steps[len(total_steps) - len(smoothed_rewards):]
-    plt.figure(figsize=(10, 6))
-    plt.plot(total_steps, episode_rewards, label="Original Rewards", alpha=0.3)
-    plt.plot(smoothed_steps, smoothed_rewards, label=f"Smoothed (Window={window_size})", linewidth=2)
-    plt.xlabel("Total Environment Steps")
-    plt.ylabel("Reward")
-    plt.title("DQN Learning Curve (Smoothed)")
-    plt.legend()
-    plt.grid()
-    save_path = os.path.join(save_dir, "learning_curve_smoothed.png")
-    plt.savefig(save_path)
-    print(f"Saved smoothed learning curve plot: {save_path}")
-    plt.show()
+        print(f"\rRun {run+1} | Episode {episode+1} | Total points: {total_points:.2f} | Steps: {total_steps}  ", end="")
 
-if __name__ == "__main__":
-    run_experiment()
+        if (episode + 1) % 100 == 0:
+            print(f"\rRun {run+1} | Episode {episode+1} | Total points: {total_points:.2f} | Steps: {total_steps}")
+
+        epsilon = utils.get_new_eps(epsilon)  # epsilon 
+
+        if total_steps >= TOTAL_STEPS:
+            print(f"\n\nRun {run+1} completed!\n")
+            q_network.save(f"ET{run+1}.h5")
+            break
+
+    all_returns_per_step.append(per_step_returns)  
+
+all_returns_per_step = np.array(all_returns_per_step)
+average_per_step = np.nanmean(all_returns_per_step, axis=0)
+std_per_step = np.nanstd(all_returns_per_step, axis=0)
+np.save("TN_ER_softupdate_decay.npy", all_returns_per_step)
+
+
+# utils.plot_history(average_per_step, std_dev=std_per_step)
+
+total_time = time.time() - start_time
+print(f"\nTotal Runtime: {total_time:.2f} s ({(total_time/60):.2f} min)")
