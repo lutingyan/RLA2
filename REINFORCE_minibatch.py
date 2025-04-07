@@ -84,6 +84,7 @@ def run_reinforce(seed=0):
             all_log_probs = torch.stack(all_log_probs)
             all_returns = torch.tensor(all_returns)
 
+            # Normalize returns (advantage)
             returns = (all_returns - all_returns.mean()) / (all_returns.std() + 1e-7)
 
             policy_loss = -all_log_probs * returns
@@ -92,7 +93,7 @@ def run_reinforce(seed=0):
             policy_loss.sum().backward()
             optimizer.step()
 
-            episode_data_batch = []  
+            episode_data_batch = []  # Reset the batch after each update
 
         scores.append(sum(episode_data['rewards']))
         steps_per_episode.append(steps)
