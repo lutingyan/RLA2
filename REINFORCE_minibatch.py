@@ -17,7 +17,7 @@ gamma = 0.99
 hidden_dim = 128
 max_episodes = 2000
 NUM_RUNS = 5
-
+minibatch_size = 32
 
 class PolicyNetwork(nn.Module):
     def __init__(self, state_dim, action_dim, hidden_dim):
@@ -47,6 +47,9 @@ def run_reinforce(seed=0):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
+
+    episode_data_batch = []
+
     for episode in range(max_episodes):
         state, _ = env.reset(seed=seed)
         episode_data = {'log_probs': [], 'rewards': []}
@@ -62,29 +65,43 @@ def run_reinforce(seed=0):
             state = next_state
             steps += 1
 
+        episode_data_batch.append(episode_data)
+
+        if len(episode_data_batch) >= minibatch_size:
+            all_log_probs = []
+            all_returns = []
+
+            for ep_data in episode_data_batch:
+                returns = []
+                R = 0
+                for r in reversed(ep_data['rewards']):
+                    R = r + gamma * R
+                    returns.insert(0, R)
+
+                all_log_probs.extend(ep_data['log_probs'])
+                all_returns.extend(returns)
+
+            all_log_probs = torch.stack(all_log_probs)
+            all_returns = torch.tensor(all_returns)
+
+            returns = (all_returns - all_returns.mean()) / (all_returns.std() + 1e-7)
+
+            policy_loss = -all_log_probs * returns
+
+            optimizer.zero_grad()
+            policy_loss.sum().backward()
+            optimizer.step()
+
+            episode_data_batch = []  
+
         scores.append(sum(episode_data['rewards']))
         steps_per_episode.append(steps)
-
-        returns = []
-        R = 0
-        for r in reversed(episode_data['rewards']):
-            R = r + gamma * R
-            returns.insert(0, R)
-
-        returns = torch.tensor(returns)
-        
-        # returns = (returns - returns.mean()) / (returns.std() + 1e-7)
-
-        policy_loss = [-log_prob * R for log_prob, R in zip(episode_data['log_probs'], returns)]
-
-        optimizer.zero_grad()
-        torch.stack(policy_loss).sum().backward()
-        optimizer.step()
 
         if episode % 100 == 0:
             print(f'Episode {episode}, Reward: {scores[-1]:.1f}')
 
     return scores, steps_per_episode
+
 
 
 if __name__ == "__main__":

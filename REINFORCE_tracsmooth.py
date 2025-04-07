@@ -47,6 +47,10 @@ def run_reinforce(seed=0):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
+    
+    # 用于追踪原始奖励的列表（用于结果保存）
+    all_returns = []
+
     for episode in range(max_episodes):
         state, _ = env.reset(seed=seed)
         episode_data = {'log_probs': [], 'rewards': []}
@@ -73,9 +77,16 @@ def run_reinforce(seed=0):
 
         returns = torch.tensor(returns)
         
-        # returns = (returns - returns.mean()) / (returns.std() + 1e-7)
+        # 保存原始奖励
+        all_returns.append(returns)
 
-        policy_loss = [-log_prob * R for log_prob, R in zip(episode_data['log_probs'], returns)]
+        # 对奖励进行标准化
+        returns = (returns - returns.mean()) / (returns.std() + 1e-7)
+
+        # 对奖励进行平滑
+        smoothed_returns = pd.Series(returns.numpy()).rolling(window=50, min_periods=1).mean()
+
+        policy_loss = [-log_prob * R for log_prob, R in zip(episode_data['log_probs'], smoothed_returns)]
 
         optimizer.zero_grad()
         torch.stack(policy_loss).sum().backward()
@@ -85,6 +96,7 @@ def run_reinforce(seed=0):
             print(f'Episode {episode}, Reward: {scores[-1]:.1f}')
 
     return scores, steps_per_episode
+
 
 
 if __name__ == "__main__":
@@ -109,7 +121,7 @@ if __name__ == "__main__":
     })
 
     os.makedirs('./results', exist_ok=True)
-    csv_path = './results/reinforce_gamma_results.csv'
+    csv_path = './results/reinforce_track_results.csv'
     df.to_csv(csv_path, index=False)
 
     print(f"\nResults saved to {csv_path}")

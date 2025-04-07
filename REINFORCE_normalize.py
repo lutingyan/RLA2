@@ -73,7 +73,7 @@ def run_reinforce(seed=0):
 
         returns = torch.tensor(returns)
         
-        # returns = (returns - returns.mean()) / (returns.std() + 1e-7)
+        returns = (returns - returns.mean()) / (returns.std() + 1e-7)
 
         policy_loss = [-log_prob * R for log_prob, R in zip(episode_data['log_probs'], returns)]
 
@@ -109,7 +109,7 @@ if __name__ == "__main__":
     })
 
     os.makedirs('./results', exist_ok=True)
-    csv_path = './results/reinforce_gamma_results.csv'
+    csv_path = './results/reinforce_normalize_results.csv'
     df.to_csv(csv_path, index=False)
 
     print(f"\nResults saved to {csv_path}")
