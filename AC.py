@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import os
 
-env = gym.make('CartPole-v1')
+env = gym.make('CartPole-v1', render_mode=None)
 state_dim = env.observation_space.shape[0]
 action_dim = env.action_space.n
 
