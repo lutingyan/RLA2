@@ -17,7 +17,7 @@ gamma = 0.99
 hidden_dim = 128
 max_episodes = 2000
 NUM_RUNS = 5
-minibatch_size = 5
+
 
 class PolicyNetwork(nn.Module):
     def __init__(self, state_dim, action_dim, hidden_dim):
@@ -39,20 +39,33 @@ class PolicyNetwork(nn.Module):
         return action.item(), dist.log_prob(action)
 
 
-def run_reinforce(seed=0):
+class ValueNetwork(nn.Module):
+    def __init__(self, state_dim, hidden_dim):
+        super().__init__()
+        self.fc1 = nn.Linear(state_dim, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        self.fc3 = nn.Linear(hidden_dim, 1)
+
+    def forward(self, x):
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        return self.fc3(x)
+
+
+def run_reinforce_with_baseline(seed=0):
     policy = PolicyNetwork(state_dim, action_dim, hidden_dim)
     optimizer = optim.Adam(policy.parameters(), lr=fixed_lr)
+
     scores = []
     steps_per_episode = []
+
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-    episode_data_batch = []
-
     for episode in range(max_episodes):
         state, _ = env.reset(seed=seed)
-        episode_data = {'log_probs': [], 'rewards': []}
+        episode_data = {'states': [], 'log_probs': [], 'rewards': []}
         done = False
         steps = 0
 
@@ -60,43 +73,36 @@ def run_reinforce(seed=0):
             action, log_prob = policy.act(state)
             next_state, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
+
+            episode_data['states'].append(torch.FloatTensor(state))
             episode_data['log_probs'].append(log_prob)
             episode_data['rewards'].append(reward)
+
             state = next_state
             steps += 1
 
-        episode_data_batch.append(episode_data)
-
-        if (episode + 1) % minibatch_size == 0:
-            all_log_probs = []
-            all_returns = []
-
-            for ep_data in episode_data_batch:
-                returns = []
-                R = 0
-                for r in reversed(ep_data['rewards']):
-                    R = r + gamma * R
-                    returns.insert(0, R)
-
-                all_log_probs.extend(ep_data['log_probs'])
-                all_returns.extend(returns)
-
-            all_log_probs = torch.stack(all_log_probs)
-            all_returns = torch.tensor(all_returns)
-
-            # Normalize returns (advantage)
-            returns = (all_returns - all_returns.mean()) / (all_returns.std() + 1e-7)
-
-            policy_loss = -all_log_probs * returns
-
-            optimizer.zero_grad()
-            policy_loss.sum().backward()
-            optimizer.step()
-
-            episode_data_batch = []  # Reset the batch after each update
-
         scores.append(sum(episode_data['rewards']))
         steps_per_episode.append(steps)
+
+        # 计算 G_t（累计折扣回报）
+        returns = []
+        R = 0
+        for r in reversed(episode_data['rewards']):
+            R = r + gamma * R
+            returns.insert(0, R)
+
+        returns = torch.tensor(returns, dtype=torch.float32)
+
+        # baseline 设为 return 的平均值
+        baseline = returns.mean()
+        advantages = returns - baseline  # 无标准化，无 value 网络
+
+        # 策略损失
+        policy_loss = [-log_prob * advantage for log_prob, advantage in zip(episode_data['log_probs'], advantages)]
+        optimizer.zero_grad()
+        torch.stack(policy_loss).sum().backward()
+        optimizer.step()
+
 
         if episode % 100 == 0:
             print(f'Episode {episode}, Reward: {scores[-1]:.1f}')
@@ -104,13 +110,13 @@ def run_reinforce(seed=0):
     return scores, steps_per_episode
 
 
-
+# 主程序
 if __name__ == "__main__":
     all_scores = []
     all_steps = []
 
     for run in range(NUM_RUNS):
-        scores, steps = run_reinforce(seed=run)
+        scores, steps = run_reinforce_with_baseline(seed=run)
         all_scores.append(scores)
         all_steps.append(steps)
 
@@ -127,7 +133,7 @@ if __name__ == "__main__":
     })
 
     os.makedirs('./results', exist_ok=True)
-    csv_path = './results/reinforce_minibatch_results.csv'
+    csv_path = './results/reinforce_baseline_results.csv'
     df.to_csv(csv_path, index=False)
 
     print(f"\nResults saved to {csv_path}")
