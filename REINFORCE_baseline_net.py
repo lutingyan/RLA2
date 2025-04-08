@@ -53,6 +53,9 @@ class ValueNetwork(nn.Module):
 
 
 def run_reinforce_with_baseline(seed=0):
+    value_net = ValueNetwork(state_dim, hidden_dim)
+    value_optimizer = optim.Adam(value_net.parameters(), lr=fixed_lr)
+    
     policy = PolicyNetwork(state_dim, action_dim, hidden_dim)
     optimizer = optim.Adam(policy.parameters(), lr=fixed_lr)
 
@@ -93,16 +96,19 @@ def run_reinforce_with_baseline(seed=0):
 
         returns = torch.tensor(returns, dtype=torch.float32)
 
-        # baseline 设为 return 的平均值
-        baseline = returns.mean()
-        advantages = returns - baseline  # 无标准化，无 value 网络
+        states_tensor = torch.stack(episode_data['states'])
+        values = value_net(states_tensor).squeeze()
+        advantages = returns - values.detach()  
 
-        # 策略损失
         policy_loss = [-log_prob * advantage for log_prob, advantage in zip(episode_data['log_probs'], advantages)]
         optimizer.zero_grad()
         torch.stack(policy_loss).sum().backward()
         optimizer.step()
 
+        value_loss = F.mse_loss(values, returns)
+        value_optimizer.zero_grad()
+        value_loss.backward()
+        value_optimizer.step()
 
         if episode % 100 == 0:
             print(f'Episode {episode}, Reward: {scores[-1]:.1f}')
