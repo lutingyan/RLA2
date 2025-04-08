@@ -68,8 +68,7 @@ def run_reinforce(seed=0):
         episode_data_batch.append(episode_data)
 
         if len(episode_data_batch) >= minibatch_size:
-            all_log_probs = []
-            all_returns = []
+            policy_losses = []
 
             for ep_data in episode_data_batch:
                 returns = []
@@ -78,22 +77,18 @@ def run_reinforce(seed=0):
                     R = r + gamma * R
                     returns.insert(0, R)
 
-                all_log_probs.extend(ep_data['log_probs'])
-                all_returns.extend(returns)
+                returns = torch.tensor(returns, dtype=torch.float32)
+                advantages = (returns - returns.mean()) / (returns.std() + 1e-7)
 
-            all_log_probs = torch.stack(all_log_probs)
-            all_returns = torch.tensor(all_returns)
+                log_probs = torch.stack(ep_data['log_probs'])
+                loss = -log_probs * advantages
+                policy_losses.append(loss.sum())
 
-            # Normalize returns (advantage)
-            all_returns = (all_returns - all_returns.mean()) / (all_returns.std() + 1e-7)
-
-            policy_loss = -all_log_probs * all_returns
-
+            # 累加所有 episode 的 loss
             optimizer.zero_grad()
-            policy_loss.sum().backward()
+            torch.stack(policy_losses).sum().backward()
             optimizer.step()
-
-            episode_data_batch = []  # Reset the batch after each update
+            episode_data_batch = []
 
         scores.append(sum(episode_data['rewards']))
         steps_per_episode.append(steps)
