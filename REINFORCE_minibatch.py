@@ -67,7 +67,7 @@ def run_reinforce(seed=0):
 
         episode_data_batch.append(episode_data)
 
-        if (episode + 1) % minibatch_size == 0:
+        if len(episode_data_batch) >= minibatch_size:
             all_log_probs = []
             all_returns = []
 
@@ -85,9 +85,9 @@ def run_reinforce(seed=0):
             all_returns = torch.tensor(all_returns)
 
             # Normalize returns (advantage)
-            returns = (all_returns - all_returns.mean()) / (all_returns.std() + 1e-7)
+            all_returns = (all_returns - all_returns.mean()) / (all_returns.std() + 1e-7)
 
-            policy_loss = -all_log_probs * returns
+            policy_loss = -all_log_probs * all_returns
 
             optimizer.zero_grad()
             policy_loss.sum().backward()
