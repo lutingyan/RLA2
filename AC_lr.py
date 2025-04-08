@@ -108,6 +108,7 @@ def train_actor_critic(lr_critic, seed=0):
 if __name__ == "__main__":
     results = {}
     for lr_critic in lrs_critic:
+        print(lr_critic)
         all_rewards = []
         for run in range(NUM_RUNS):
             rewards = train_actor_critic(lr_critic, seed=run)
