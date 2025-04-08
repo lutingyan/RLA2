@@ -17,7 +17,7 @@ gamma = 0.99
 lr_actor = 1e-4
 lr_critic = 0.001  # Critic higher
 hidden_dim = 128 
-max_episodes = 200
+max_episodes = 2000
 NUM_RUNS = 5
 
 class Actor(nn.Module):
