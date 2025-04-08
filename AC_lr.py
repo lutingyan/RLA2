@@ -17,8 +17,8 @@ gamma = 0.99
 lr_actor = 1e-4
 lrs_critic = [0.001, 1e-4, 5e-4, 1e-5]    # Critic higher
 hidden_dim = 128 
-max_episodes = 2000
-NUM_RUNS = 5
+max_episodes = 200
+NUM_RUNS = 1
 
 class Actor(nn.Module):
     def __init__(self, state_dim, action_dim, hidden_dim):
@@ -50,7 +50,7 @@ class Critic(nn.Module):
     def forward(self, x):
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
-        return F.softmax(self.fc3(x), dim=-1)
+        return self.fc3(x)
 
 # Actor-Critic 主函数
 def train_actor_critic(lr_critic, seed=0):
