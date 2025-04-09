@@ -54,54 +54,72 @@ class Critic(nn.Module):
         x = F.relu(self.fc3(x))
         return self.fc4(x)
 
+def compute_returns(rewards, dones, gamma=0.99, n_steps=10):
+    returns = np.zeros(len(rewards), dtype=np.float32)
+    last_return = 0
+
+    for t in reversed(range(len(rewards))):
+        if t + n_steps < len(rewards):
+            returns[t] = rewards[t] + gamma * returns[t + 1] * (1 - dones[t])
+        else:
+            returns[t] = rewards[t] + last_return * (1 - dones[t])
+        last_return = returns[t]
+
+    return torch.FloatTensor(returns)
+
 # Actor-Critic 主函数
 def train_actor_critic(seed=0):
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
-
     actor = Actor(state_dim, action_dim, hidden_dim)
     critic = Critic(state_dim, hidden_dim)
-
     optimizer_actor = optim.Adam(actor.parameters(), lr=lr_actor)
     optimizer_critic = optim.Adam(critic.parameters(), lr=lr_critic)
 
     rewards_all = []
 
     for episode in range(max_episodes):
-        state, _ = env.reset(seed=seed)
+        state, _ = env.reset()
         done = False
-        total_reward = 0
+        episode_data = []
+        episode_rewards = []
+        episode_steps = 0
 
         while not done:
             action, log_prob = actor.get_action(state)
             next_state, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
-
-            state_tensor = torch.FloatTensor(state)
-            next_state_tensor = torch.FloatTensor(next_state)
-            reward_tensor = torch.tensor([reward], dtype=torch.float)
-
-            target = reward_tensor + gamma * critic(next_state_tensor) * (1 - int(done))
-            value = critic(state_tensor)
-            td_error = target - value
-
-            # 更新 Critic
-            critic_loss = td_error.pow(2)
-            optimizer_critic.zero_grad()
-            critic_loss.backward()
-            optimizer_critic.step()
-
-            # 更新 Actor
-            actor_loss = -log_prob * td_error.detach()
-            optimizer_actor.zero_grad()
-            actor_loss.backward()
-            optimizer_actor.step()
-
+            state_tensor = torch.FloatTensor(state).unsqueeze(0)
+            value = critic(state_tensor).item()
+            episode_data.append((state, reward, value, log_prob, done))
+            episode_rewards.append(reward)
             state = next_state
-            total_reward += reward
+            episode_steps += 1
 
+        total_reward = sum(episode_rewards)
         rewards_all.append(total_reward)
+
+        states, rewards, values, log_probs, dones = zip(*episode_data)
+        states = torch.FloatTensor(np.array(states))
+        rewards = np.array(rewards)
+        values = np.array(values)
+        dones = np.array(dones)
+
+        returns = compute_returns(rewards, dones, gamma)
+        policy_loss = -(returns.detach() * torch.stack(log_probs)).mean()
+        
+        value_preds = critic(states).squeeze()
+        value_loss = F.mse_loss(value_preds, returns)
+
+        optimizer_actor.zero_grad()
+        policy_loss.backward()
+        optimizer_actor.step()
+
+        optimizer_critic.zero_grad()
+        value_loss.backward()
+        optimizer_critic.step()
+
         if episode % 100 == 0:
             print(f'Episode {episode}, Reward: {rewards_all[-1]:.1f}')
 

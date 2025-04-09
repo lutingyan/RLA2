@@ -8,19 +8,17 @@ import matplotlib.pyplot as plt
 import random
 import pandas as pd
 import os
-# 设置环境
 env = gym.make('CartPole-v1')
 state_dim = env.observation_space.shape[0]
 action_dim = env.action_space.n
 gamma = 0.99
-n_steps = 5
+n_steps = 10
 lr_actor = 1e-4
 lr_critic = 0.001
 hidden_dim = 128
 max_episodes = 2000
 NUM_RUNS = 5
 
-# 策略网络（Actor）—— 与 AC 保持一致结构
 class Actor(nn.Module):
     def __init__(self, state_dim, action_dim, hidden_dim):
         super().__init__()
@@ -41,7 +39,6 @@ class Actor(nn.Module):
         return action.item(), dist.log_prob(action)
 
 
-# 值函数网络（Critic）
 class Critic(nn.Module):
     def __init__(self, state_dim, hidden_dim):
         super().__init__()
@@ -55,8 +52,7 @@ class Critic(nn.Module):
         return self.fc3(x)
 
 
-# 计算 n 步回报
-def compute_returns(rewards, dones, gamma=0.99, n_steps=5):
+def compute_returns(rewards, dones, gamma=0.99, n_steps=10):
     returns = np.zeros(len(rewards), dtype=np.float32)
     last_return = 0
 
@@ -70,8 +66,7 @@ def compute_returns(rewards, dones, gamma=0.99, n_steps=5):
     return torch.FloatTensor(returns)
 
 
-# A2C 主训练函数
-def run_a2c(seed):
+def run_ac(seed):
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
@@ -103,15 +98,15 @@ def run_a2c(seed):
         total_reward = sum(episode_rewards)
         rewards_all.append(total_reward)
 
-        # 解包轨迹数据
         states, rewards, values, log_probs, dones = zip(*episode_data)
         states = torch.FloatTensor(np.array(states))
         rewards = np.array(rewards)
         values = np.array(values)
         dones = np.array(dones)
 
-        # 计算回报
+        # n-step
         returns = compute_returns(rewards, dones, gamma, n_steps)
+        # only value
         policy_loss = -(returns.detach() * torch.stack(log_probs)).mean()
         
         value_preds = critic(states).squeeze()
@@ -131,11 +126,10 @@ def run_a2c(seed):
     return rewards_all
 
 
-# 可视化训练结果
 if __name__ == "__main__":
     all_rewards = []
     for run in range(NUM_RUNS):
-        rewards = run_a2c(seed=run)
+        rewards = run_ac(seed=run)
         all_rewards.append(rewards)
     avg_reward = np.nanmean(all_rewards, axis=0)
     std_reward = np.nanstd(all_rewards, axis=0)

@@ -9,10 +9,10 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import os
 
-env = gym.make('CartPole-v1', render_mode=None)
+env = gym.make('CartPole-v1')
 state_dim = env.observation_space.shape[0]
 action_dim = env.action_space.n
-
+torch.autograd.set_detect_anomaly(True)
 gamma = 0.99
 lr_actor = 1e-4
 lr_critic = 0.001  # Critic higher
@@ -20,18 +20,27 @@ hidden_dim = 128
 max_episodes = 2000
 NUM_RUNS = 5
 
-class Actor(nn.Module):
-    def __init__(self, state_dim, action_dim, hidden_dim):
+# 创建共享网络部分
+class SharedNetwork(nn.Module):
+    def __init__(self, state_dim, hidden_dim):
         super().__init__()
         self.fc1 = nn.Linear(state_dim, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
 
-        self.fc3 = nn.Linear(hidden_dim, action_dim)
-
     def forward(self, x):
         x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        return F.softmax(self.fc3(x), dim=-1)
+        return F.relu(self.fc2(x))
+
+# Actor 网络
+class Actor(nn.Module):
+    def __init__(self, shared_network, action_dim):
+        super().__init__()
+        self.shared_network = shared_network
+        self.fc_out = nn.Linear(hidden_dim, action_dim)
+
+    def forward(self, x):
+        x = self.shared_network(x)
+        return F.softmax(self.fc_out(x), dim=-1)
 
     def get_action(self, state):
         state = torch.FloatTensor(state)
@@ -42,15 +51,15 @@ class Actor(nn.Module):
 
 # Critic 网络
 class Critic(nn.Module):
-    def __init__(self, state_dim, hidden_dim):
+    def __init__(self, shared_network):
         super().__init__()
-        self.fc1 = nn.Linear(state_dim, hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, 1)
+        self.shared_network = shared_network
+        self.fc_out = nn.Linear(hidden_dim, 1)
 
     def forward(self, x):
-        x = F.relu(self.fc1(x))
-        return self.fc2(x)
-    
+        x = self.shared_network(x)
+        return self.fc_out(x)
+
 def compute_returns(rewards, dones, gamma=0.99, n_steps=10):
     returns = np.zeros(len(rewards), dtype=np.float32)
     last_return = 0
@@ -64,15 +73,26 @@ def compute_returns(rewards, dones, gamma=0.99, n_steps=10):
 
     return torch.FloatTensor(returns)
 
+
 # Actor-Critic 主函数
 def train_actor_critic(seed=0):
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
-    actor = Actor(state_dim, action_dim, hidden_dim)
-    critic = Critic(state_dim, hidden_dim)
-    optimizer_actor = optim.Adam(actor.parameters(), lr=lr_actor)
-    optimizer_critic = optim.Adam(critic.parameters(), lr=lr_critic)
+
+    # 创建共享网络
+    shared_network = SharedNetwork(state_dim, hidden_dim)
+
+    # 创建 Actor 和 Critic
+    actor = Actor(shared_network, action_dim)
+    critic = Critic(shared_network)
+
+    # 优化器参数分组
+    optimizer = optim.Adam([
+        {'params': shared_network.parameters(), 'lr': lr_critic},
+        {'params': actor.fc_out.parameters(), 'lr': lr_actor},
+        {'params': critic.fc_out.parameters(), 'lr': lr_critic}
+    ])
 
     rewards_all = []
 
@@ -102,20 +122,17 @@ def train_actor_critic(seed=0):
         rewards = np.array(rewards)
         values = np.array(values)
         dones = np.array(dones)
-
         returns = compute_returns(rewards, dones, gamma)
         policy_loss = -(returns.detach() * torch.stack(log_probs)).mean()
-        
+            
         value_preds = critic(states).squeeze()
         value_loss = F.mse_loss(value_preds, returns)
 
-        optimizer_actor.zero_grad()
-        policy_loss.backward()
-        optimizer_actor.step()
-
-        optimizer_critic.zero_grad()
+        # 合并梯度更新
+        optimizer.zero_grad()
         value_loss.backward()
-        optimizer_critic.step()
+        policy_loss.backward()
+        optimizer.step()
 
         if episode % 100 == 0:
             print(f'Episode {episode}, Reward: {rewards_all[-1]:.1f}')
@@ -136,7 +153,7 @@ if __name__ == "__main__":
         'std_reward': std_reward,
     })
     os.makedirs('./results', exist_ok=True)
-    csv_path = './results/a3c2_results.csv'
+    csv_path = './results/ac_share_results.csv'
     df.to_csv(csv_path, index=False)
 
     print(f"\nResults saved to {csv_path}")

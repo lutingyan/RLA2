@@ -5,18 +5,19 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-import matplotlib.pyplot as plt
 import pandas as pd
 import os
+from collections import deque
 
-env = gym.make('CartPole-v1', render_mode=None)
+env = gym.make('CartPole-v1')
 state_dim = env.observation_space.shape[0]
 action_dim = env.action_space.n
 
 gamma = 0.99
+n_steps = [1, 5, 10, 20]
 lr_actor = 1e-4
-lr_critic = 0.001  # Critic higher
-hidden_dim = 128 
+lr_critic = 0.001
+hidden_dim = 128
 max_episodes = 2000
 NUM_RUNS = 5
 
@@ -25,7 +26,6 @@ class Actor(nn.Module):
         super().__init__()
         self.fc1 = nn.Linear(state_dim, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-
         self.fc3 = nn.Linear(hidden_dim, action_dim)
 
     def forward(self, x):
@@ -40,18 +40,20 @@ class Actor(nn.Module):
         action = dist.sample()
         return action.item(), dist.log_prob(action)
 
-# Critic 网络
+# Critic 
 class Critic(nn.Module):
     def __init__(self, state_dim, hidden_dim):
         super().__init__()
         self.fc1 = nn.Linear(state_dim, hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, 1)
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        self.fc3 = nn.Linear(hidden_dim, 1)
 
     def forward(self, x):
         x = F.relu(self.fc1(x))
-        return self.fc2(x)
-    
-def compute_returns(rewards, dones, gamma=0.99, n_steps=10):
+        x = F.relu(self.fc2(x))
+        return self.fc3(x)
+
+def compute_returns(rewards, dones, gamma=0.99, n_steps=5):
     returns = np.zeros(len(rewards), dtype=np.float32)
     last_return = 0
 
@@ -64,8 +66,8 @@ def compute_returns(rewards, dones, gamma=0.99, n_steps=10):
 
     return torch.FloatTensor(returns)
 
-# Actor-Critic 主函数
-def train_actor_critic(seed=0):
+
+def train_actor_critic(n_step, seed=0):
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
@@ -103,7 +105,7 @@ def train_actor_critic(seed=0):
         values = np.array(values)
         dones = np.array(dones)
 
-        returns = compute_returns(rewards, dones, gamma)
+        returns = compute_returns(rewards, dones, gamma, n_step)
         policy_loss = -(returns.detach() * torch.stack(log_probs)).mean()
         
         value_preds = critic(states).squeeze()
@@ -122,23 +124,37 @@ def train_actor_critic(seed=0):
 
     return rewards_all
 
+
 if __name__ == "__main__":
-    all_rewards = []
-    for run in range(NUM_RUNS):
-        rewards = train_actor_critic(seed=run)
-        all_rewards.append(rewards)
-    avg_reward = np.nanmean(all_rewards, axis=0)
-    std_reward = np.nanstd(all_rewards, axis=0)
+    results = {}
+    for n_step in n_steps:
+        print(n_step)
+        all_rewards = []
+        for run in range(NUM_RUNS):
+            rewards = train_actor_critic(n_step, seed=run)
+            all_rewards.append(rewards)
+        avg_reward = np.nanmean(all_rewards, axis=0)
+        std_reward = np.nanstd(all_rewards, axis=0)
+        results[n_step] = {
+            'avg_reward': avg_reward,
+            'std_reward': std_reward,
+        }
     
-    df = pd.DataFrame({
-        'episode': np.arange(max_episodes),
-        'avg_reward': avg_reward,
-        'std_reward': std_reward,
-    })
+    dfs = []
+    for n_step in n_steps:
+        df = pd.DataFrame({
+            'n_step': [n_step] * max_episodes,
+            'episode': np.arange(max_episodes),
+            'avg_reward': results[n_step]['avg_reward'],
+            'std_reward': results[n_step]['std_reward'],
+        })
+        dfs.append(df)
+
+    final_df = pd.concat(dfs)
     os.makedirs('./results', exist_ok=True)
-    csv_path = './results/a3c2_results.csv'
-    df.to_csv(csv_path, index=False)
+    csv_path = './results/ac_n_step_results.csv'
+    final_df.to_csv(csv_path, index=False)
 
     print(f"\nResults saved to {csv_path}")
     print("\nSummary:")
-    print(df['avg_reward'].agg(['mean', 'max']))
+    print(final_df['avg_reward'].agg(['mean', 'max']))
