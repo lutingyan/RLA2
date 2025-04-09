@@ -8,12 +8,10 @@ import torch.nn.functional as F
 import pandas as pd
 import os
 
-# 环境初始化
 env = gym.make('CartPole-v1')
 state_dim = env.observation_space.shape[0]
 action_dim = env.action_space.n
 
-# 超参数
 fixed_lr = 1e-4
 gamma = 0.99
 hidden_dim = 128
@@ -21,7 +19,6 @@ max_episodes = 2000
 NUM_RUNS = 5
 
 
-# 策略网络
 class PolicyNetwork(nn.Module):
     def __init__(self, state_dim, action_dim, hidden_dim):
         super().__init__()
@@ -42,7 +39,7 @@ class PolicyNetwork(nn.Module):
         return action.item(), dist.log_prob(action)
 
 
-# 主训练函数：REINFORCE + scalar baseline
+# REINFORCE + baseline
 def run_reinforce_with_constant_baseline(seed=0):
     policy = PolicyNetwork(state_dim, action_dim, hidden_dim)
     optimizer = optim.Adam(policy.parameters(), lr=fixed_lr)
@@ -50,7 +47,6 @@ def run_reinforce_with_constant_baseline(seed=0):
     scores = []
     steps_per_episode = []
 
-    # 固定种子
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -71,12 +67,11 @@ def run_reinforce_with_constant_baseline(seed=0):
             state = next_state
             steps += 1
 
-        # 累计统计
         total_reward = sum(episode_data['rewards'])
         scores.append(total_reward)
         steps_per_episode.append(steps)
 
-        # 计算 Gt（从后往前）
+
         returns = []
         R = 0
         for r in reversed(episode_data['rewards']):
@@ -84,11 +79,11 @@ def run_reinforce_with_constant_baseline(seed=0):
             returns.insert(0, R)
         returns = torch.tensor(returns, dtype=torch.float32)
 
-        # 使用常数 baseline（当前 episode 的平均 return）
+        # constant baseline
         baseline = returns.mean()
         advantages = returns - baseline
 
-        # 策略损失
+        # policy loss
         policy_loss = [-log_prob * advantage for log_prob, advantage in zip(episode_data['log_probs'], advantages)]
         optimizer.zero_grad()
         torch.stack(policy_loss).sum().backward()
@@ -100,7 +95,6 @@ def run_reinforce_with_constant_baseline(seed=0):
     return scores, steps_per_episode
 
 
-# 主程序：多次运行并记录结果
 if __name__ == "__main__":
     all_scores = []
     all_steps = []
