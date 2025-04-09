@@ -20,7 +20,7 @@ hidden_dim = 128
 max_episodes = 2000
 NUM_RUNS = 5
 
-# 创建共享网络部分
+# shared network
 class SharedNetwork(nn.Module):
     def __init__(self, state_dim, hidden_dim):
         super().__init__()
@@ -31,7 +31,7 @@ class SharedNetwork(nn.Module):
         x = F.relu(self.fc1(x))
         return F.relu(self.fc2(x))
 
-# Actor 网络
+# Actor Head
 class Actor(nn.Module):
     def __init__(self, shared_network, action_dim):
         super().__init__()
@@ -49,7 +49,7 @@ class Actor(nn.Module):
         action = dist.sample()
         return action.item(), dist.log_prob(action)
 
-# Critic 网络
+# Critic Head
 class Critic(nn.Module):
     def __init__(self, shared_network):
         super().__init__()
@@ -74,20 +74,18 @@ def compute_returns(rewards, dones, gamma=0.99, n_steps=10):
     return torch.FloatTensor(returns)
 
 
-# Actor-Critic 主函数
+# Actor-Critic 
 def train_actor_critic(seed=0):
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
 
-    # 创建共享网络
     shared_network = SharedNetwork(state_dim, hidden_dim)
 
-    # 创建 Actor 和 Critic
     actor = Actor(shared_network, action_dim)
     critic = Critic(shared_network)
 
-    # 优化器参数分组
+    # 3 optimizers
     optimizer = optim.Adam([
         {'params': shared_network.parameters(), 'lr': lr_critic},
         {'params': actor.fc_out.parameters(), 'lr': lr_actor},
@@ -128,7 +126,7 @@ def train_actor_critic(seed=0):
         value_preds = critic(states).squeeze()
         value_loss = F.mse_loss(value_preds, returns)
 
-        # 合并梯度更新
+        # integrate gradient
         optimizer.zero_grad()
         value_loss.backward()
         policy_loss.backward()

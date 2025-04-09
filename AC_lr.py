@@ -39,7 +39,7 @@ class Actor(nn.Module):
         action = dist.sample()
         return action.item(), dist.log_prob(action)
 
-# Critic 网络
+# Critic
 class Critic(nn.Module):
     def __init__(self, state_dim, hidden_dim):
         super().__init__()
@@ -65,7 +65,7 @@ def compute_returns(rewards, dones, gamma=0.99, n_steps=10):
 
     return torch.FloatTensor(returns)
 
-# Actor-Critic 主函数
+# Actor-Critic 
 def train_actor_critic(lr_critic, seed=0):
     torch.manual_seed(seed)
     np.random.seed(seed)
