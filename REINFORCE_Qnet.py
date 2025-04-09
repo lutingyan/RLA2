@@ -1,25 +1,24 @@
 import gymnasium as gym
 import numpy as np
-import random
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
+import matplotlib.pyplot as plt
+import random
 import pandas as pd
 import os
-
 env = gym.make('CartPole-v1')
 state_dim = env.observation_space.shape[0]
 action_dim = env.action_space.n
-
-fixed_lr = 1e-4
 gamma = 0.99
+lr_actor = 1e-4
+lr_critic = 0.001
 hidden_dim = 128
 max_episodes = 2000
 NUM_RUNS = 5
 
-
-class PolicyNetwork(nn.Module):
+class Actor(nn.Module):
     def __init__(self, state_dim, action_dim, hidden_dim):
         super().__init__()
         self.fc1 = nn.Linear(state_dim, hidden_dim)
@@ -32,19 +31,19 @@ class PolicyNetwork(nn.Module):
         return F.softmax(self.fc3(x), dim=-1)
 
     def act(self, state):
-        state = torch.FloatTensor(np.array(state)).unsqueeze(0)
+        state = torch.FloatTensor(state)
         probs = self.forward(state)
         dist = torch.distributions.Categorical(probs)
         action = dist.sample()
         return action.item(), dist.log_prob(action)
 
 
-class QNetwork(nn.Module):
-    def __init__(self, state_dim, action_dim, hidden_dim):
+class Critic(nn.Module):
+    def __init__(self, state_dim, hidden_dim):
         super().__init__()
         self.fc1 = nn.Linear(state_dim, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-        self.fc3 = nn.Linear(hidden_dim, action_dim)
+        self.fc3 = nn.Linear(hidden_dim, 1)
 
     def forward(self, x):
         x = F.relu(self.fc1(x))
@@ -52,92 +51,92 @@ class QNetwork(nn.Module):
         return self.fc3(x)
 
 
-def run_reinforce(seed=0):
-    policy = PolicyNetwork(state_dim, action_dim, hidden_dim)
-    optimizer = optim.Adam(policy.parameters(), lr=fixed_lr)
-    q_network = QNetwork(state_dim, action_dim, hidden_dim)
-    q_optimizer = optim.Adam(q_network.parameters(), lr=fixed_lr)
-    loss_fn = nn.MSELoss()
-    scores = []
-    steps_per_episode = []
-    random.seed(seed)
-    np.random.seed(seed)
+def compute_returns(rewards, dones, gamma=0.99):
+        returns = []
+        R = 0
+        for r, done in zip(reversed(rewards), reversed(dones)):
+            R = r + gamma * R * (1 - done)
+            returns.insert(0, R)
+
+        returns = torch.FloatTensor(returns)
+        return returns
+
+
+def run_ac(seed):
     torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    actor = Actor(state_dim, action_dim, hidden_dim)
+    critic = Critic(state_dim, hidden_dim)
+    optimizer_actor = optim.Adam(actor.parameters(), lr=lr_actor)
+    optimizer_critic = optim.Adam(critic.parameters(), lr=lr_critic)
+
+    rewards_all = []
+
     for episode in range(max_episodes):
-        state, _ = env.reset(seed=seed)
-        episode_data = {'log_probs': [], 'rewards': [], 'states': [], 'actions': [], 'next_states': [], 'dones': []}
+        state, _ = env.reset()
         done = False
-        steps = 0
+        episode_data = []
+        episode_rewards = []
+        episode_steps = 0
 
         while not done:
-            action, log_prob = policy.act(state)
+            action, log_prob = actor.act(state)
             next_state, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
-            episode_data['log_probs'].append(log_prob)
-            episode_data['rewards'].append(reward)
-            episode_data['states'].append(state)
-            episode_data['actions'].append(action)
-            episode_data['next_states'].append(next_state)
-            episode_data['dones'].append(done)
+            state_tensor = torch.FloatTensor(state).unsqueeze(0)
+            value = critic(state_tensor).item()
+            episode_data.append((state, reward, value, log_prob, done))
+            episode_rewards.append(reward)
             state = next_state
-            steps += 1
+            episode_steps += 1
 
-        scores.append(sum(episode_data['rewards']))
-        steps_per_episode.append(steps)
+        total_reward = sum(episode_rewards)
+        rewards_all.append(total_reward)
 
-        states = torch.FloatTensor(episode_data['states'])
-        actions = torch.LongTensor(episode_data['actions']).unsqueeze(1)
-        rewards = torch.FloatTensor(episode_data['rewards'])
-        next_states = torch.FloatTensor(episode_data['next_states'])
-        dones = torch.FloatTensor(episode_data['dones'])
+        states, rewards, values, log_probs, dones = zip(*episode_data)
+        states = torch.FloatTensor(np.array(states))
+        rewards = np.array(rewards)
+        values = np.array(values)
+        dones = np.array(dones)
 
-        with torch.no_grad():
-            next_q_values = q_network(next_states).max(1)[0]
-            targets = rewards + gamma * next_q_values * (1 - dones)
+        # monte-carlo
+        returns = compute_returns(rewards, dones, gamma)
+        # policy loss only with values
+        policy_loss = -(returns.detach() * torch.stack(log_probs)).mean()
+        
+        value_preds = critic(states).squeeze()
+        value_loss = F.mse_loss(value_preds, returns)
 
-        q_values = q_network(states).gather(1, actions).squeeze()
-        q_loss = loss_fn(q_values, targets)
+        optimizer_actor.zero_grad()
+        policy_loss.backward()
+        optimizer_actor.step()
 
-        q_optimizer.zero_grad()
-        q_loss.backward()
-        q_optimizer.step()
-
-        returns = q_values.detach()
-        policy_loss = [-log_prob * R for log_prob, R in zip(episode_data['log_probs'], returns)]
-
-        optimizer.zero_grad()
-        torch.stack(policy_loss).sum().backward()
-        optimizer.step()
+        optimizer_critic.zero_grad()
+        value_loss.backward()
+        optimizer_critic.step()
 
         if episode % 100 == 0:
-            print(f'Episode {episode}, Reward: {scores[-1]:.1f}')
+            print(f'Episode {episode}, Reward: {rewards_all[-1]:.1f}')
 
-    return scores, steps_per_episode
+    return rewards_all
 
 
 if __name__ == "__main__":
-    all_scores = []
-    all_steps = []
-
+    all_rewards = []
     for run in range(NUM_RUNS):
-        scores, steps = run_reinforce(seed=run)
-        all_scores.append(scores)
-        all_steps.append(steps)
-
-    avg_reward = np.nanmean(all_scores, axis=0)
-    std_reward = np.nanstd(all_scores, axis=0)
-    cum_steps = np.cumsum(all_steps[0])
-
+        rewards = run_ac(seed=run)
+        all_rewards.append(rewards)
+    avg_reward = np.nanmean(all_rewards, axis=0)
+    std_reward = np.nanstd(all_rewards, axis=0)
+    
     df = pd.DataFrame({
-        'gamma': [gamma] * max_episodes,
         'episode': np.arange(max_episodes),
         'avg_reward': avg_reward,
         'std_reward': std_reward,
-        'cum_steps': cum_steps
     })
-
     os.makedirs('./results', exist_ok=True)
-    csv_path = './results/reinforce_Qnet_results.csv'
+    csv_path = './results/reinforce_net_results.csv'
     df.to_csv(csv_path, index=False)
 
     print(f"\nResults saved to {csv_path}")
