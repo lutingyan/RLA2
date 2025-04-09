@@ -47,6 +47,7 @@ def run_reinforce(seed=0):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
+    
     for episode in range(max_episodes):
         state, _ = env.reset(seed=seed)
         episode_data = {'log_probs': [], 'rewards': []}
@@ -65,26 +66,32 @@ def run_reinforce(seed=0):
         scores.append(sum(episode_data['rewards']))
         steps_per_episode.append(steps)
 
-        returns = []
-        R = 0
-        for r in reversed(episode_data['rewards']):
-            R = r + gamma * R
-            returns.insert(0, R)
-
-        returns = torch.tensor(returns)
+        optimizer.zero_grad() 
         
-        # returns = (returns - returns.mean()) / (returns.std() + 1e-7)
+        R = 0
+        policy_loss = 0
+        t_all = 0
+        
+        # iterate reward reversely
+        # global gamma
+        for t in reversed(range(len(episode_data['rewards']))):
+            r = episode_data['rewards'][t]
+            log_prob = episode_data['log_probs'][t]
+            
+            R = r + gamma * R
+            policy_loss += -log_prob * (gamma ** t_all) * R 
+            t_all += 1
 
-        policy_loss = [-log_prob * R for log_prob, R in zip(episode_data['log_probs'], returns)]
-
-        optimizer.zero_grad()
-        torch.stack(policy_loss).sum().backward()
+            policy_loss.backward(retain_graph=True)
+            policy_loss = 0
         optimizer.step()
 
         if episode % 100 == 0:
             print(f'Episode {episode}, Reward: {scores[-1]:.1f}')
 
     return scores, steps_per_episode
+
+
 
 
 if __name__ == "__main__":
