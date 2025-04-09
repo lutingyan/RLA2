@@ -87,7 +87,6 @@ def run_reinforce_with_baseline(seed=0):
         scores.append(sum(episode_data['rewards']))
         steps_per_episode.append(steps)
 
-        # 计算 G_t（累计折扣回报）
         returns = []
         R = 0
         for r in reversed(episode_data['rewards']):
@@ -98,8 +97,9 @@ def run_reinforce_with_baseline(seed=0):
 
         states_tensor = torch.stack(episode_data['states'])
         values = value_net(states_tensor).squeeze()
+        
+        # Advantage
         advantages = returns - values.detach()  
-
         policy_loss = [-log_prob * advantage for log_prob, advantage in zip(episode_data['log_probs'], advantages)]
         optimizer.zero_grad()
         torch.stack(policy_loss).sum().backward()
@@ -116,7 +116,6 @@ def run_reinforce_with_baseline(seed=0):
     return scores, steps_per_episode
 
 
-# 主程序
 if __name__ == "__main__":
     all_scores = []
     all_steps = []
