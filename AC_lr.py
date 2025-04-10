@@ -91,7 +91,7 @@ def run_ac(lr_critic, seed):
 
         # Collecting trajectory data
         while not done:
-            state_tensor = torch.FloatTensor(state).unsqueeze(0).to(device)
+            state_tensor = torch.FloatTensor(state).unsqueeze(0).to(device)  # Ensure state is on the correct device
             action, log_prob = actor.act(state)
             next_state, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
