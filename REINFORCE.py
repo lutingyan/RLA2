@@ -32,11 +32,12 @@ class PolicyNetwork(nn.Module):
         return F.softmax(self.fc3(x), dim=-1)
 
     def act(self, state):
-        state = torch.FloatTensor(np.array(state)).unsqueeze(0)
-        probs = self.forward(state)
-        dist = torch.distributions.Categorical(probs)
-        action = dist.sample()
-        return action.item(), dist.log_prob(action)
+        state = torch.FloatTensor(state).unsqueeze(0)
+        with torch.no_grad():  # 动作选择不记录梯度
+            probs = self.forward(state)
+            dist = torch.distributions.Categorical(probs)
+            action = dist.sample()
+        return action.item(), probs, action
 
 
 def run_reinforce(seed=0):
@@ -47,49 +48,51 @@ def run_reinforce(seed=0):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    
+
     for episode in range(max_episodes):
         state, _ = env.reset(seed=seed)
-        episode_data = {'log_probs': [], 'rewards': []}
+        episode_data = {'states': [], 'actions': [], 'probs': [], 'rewards': []}
         done = False
         steps = 0
 
+        # Store trajectory (states, actions, probs, rewards)
         while not done:
-            action, log_prob = policy.act(state)
+            action, probs, action_tensor = policy.act(state)
             next_state, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
-            episode_data['log_probs'].append(log_prob)
+            episode_data['states'].append(state)
+            episode_data['actions'].append(action_tensor)
+            episode_data['probs'].append(probs)
             episode_data['rewards'].append(reward)
             state = next_state
             steps += 1
 
         scores.append(sum(episode_data['rewards']))
-        steps_per_episode.append(steps)
 
-        optimizer.zero_grad() 
-        
-        R = 0
-        policy_loss = 0
-        t_all = 0
-        
-        # iterate reward reversely
-        # global gamma
-        for t in reversed(range(len(episode_data['rewards']))):
-            r = episode_data['rewards'][t]
-            log_prob = episode_data['log_probs'][t]
-            
-            R = r + gamma * R
-            policy_loss += -log_prob * (gamma ** t_all) * R 
-            t_all += 1
+        # Update the policy step-by-step
+        for t in range(len(episode_data['rewards'])):
+            # Calculate the return R_t at time step t
+            R = sum(gamma**(k-t) * episode_data['rewards'][k] for k in range(t, len(episode_data['rewards'])))
 
-            policy_loss.backward(retain_graph=True)
-            policy_loss = 0
-        optimizer.step()
+            # Dynamic log_prob calculation
+            state_t = torch.FloatTensor(episode_data['states'][t]).unsqueeze(0)
+            probs_t = policy.forward(state_t)
+            dist_t = torch.distributions.Categorical(probs_t)
+            log_prob_t = dist_t.log_prob(episode_data['actions'][t])
+
+            # Loss function: policy gradient loss
+            loss = -log_prob_t * (gamma ** t) * R
+
+            # Backpropagation and policy update
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
 
         if episode % 100 == 0:
             print(f'Episode {episode}, Reward: {scores[-1]:.1f}')
 
     return scores, steps_per_episode
+
 
 
 
