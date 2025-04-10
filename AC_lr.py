@@ -32,14 +32,14 @@ class Actor(nn.Module):
         x = F.relu(self.fc2(x))
         return F.softmax(self.fc3(x), dim=-1)
 
-    def get_action(self, state):
+    def act(self, state):
         state = torch.FloatTensor(state)
         probs = self.forward(state)
         dist = torch.distributions.Categorical(probs)
         action = dist.sample()
         return action.item(), dist.log_prob(action)
 
-# Critic
+# Critic 
 class Critic(nn.Module):
     def __init__(self, state_dim, hidden_dim):
         super().__init__()
@@ -52,26 +52,31 @@ class Critic(nn.Module):
         x = F.relu(self.fc2(x))
         return self.fc3(x)
 
-def compute_returns(rewards, dones, gamma=0.99, n_steps=10):
+def compute_returns(rewards, dones, values, gamma=0.99, n_steps=10):
     returns = np.zeros(len(rewards), dtype=np.float32)
-    last_return = 0
-
-    for t in reversed(range(len(rewards))):
-        if t + n_steps < len(rewards):
-            returns[t] = rewards[t] + gamma * returns[t + 1] * (1 - dones[t])
-        else:
-            returns[t] = rewards[t] + last_return * (1 - dones[t])
-        last_return = returns[t]
-
+    T = len(rewards)
+    for t in range(T):
+        R = 0
+        step_count = 0
+        for k in range(t, min(t + n_steps, T)):
+            R += (gamma ** step_count) * rewards[k]
+            step_count += 1
+            if dones[k]: 
+                break
+        if (k < T - 1) and not dones[k]:
+            R += (gamma ** step_count) * values[k + 1]
+        returns[t] = R
     return torch.FloatTensor(returns)
 
-# Actor-Critic 
-def train_actor_critic(lr_critic, seed=0):
+def run_ac(lr_critic, seed):
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
-    actor = Actor(state_dim, action_dim, hidden_dim)
-    critic = Critic(state_dim, hidden_dim)
+    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    actor = Actor(state_dim, action_dim, hidden_dim).to(device)
+    critic = Critic(state_dim, hidden_dim).to(device)
     optimizer_actor = optim.Adam(actor.parameters(), lr=lr_actor)
     optimizer_critic = optim.Adam(critic.parameters(), lr=lr_critic)
 
@@ -84,11 +89,12 @@ def train_actor_critic(lr_critic, seed=0):
         episode_rewards = []
         episode_steps = 0
 
+        # Collecting trajectory data
         while not done:
-            action, log_prob = actor.get_action(state)
+            state_tensor = torch.FloatTensor(state).unsqueeze(0).to(device)
+            action, log_prob = actor.act(state)
             next_state, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
-            state_tensor = torch.FloatTensor(state).unsqueeze(0)
             value = critic(state_tensor).item()
             episode_data.append((state, reward, value, log_prob, done))
             episode_rewards.append(reward)
@@ -99,17 +105,22 @@ def train_actor_critic(lr_critic, seed=0):
         rewards_all.append(total_reward)
 
         states, rewards, values, log_probs, dones = zip(*episode_data)
-        states = torch.FloatTensor(np.array(states))
-        rewards = np.array(rewards)
-        values = np.array(values)
-        dones = np.array(dones)
+        states = torch.FloatTensor(np.array(states)).to(device)
+        rewards = torch.tensor(rewards, dtype=torch.float32).to(device)
+        values = torch.tensor(values, dtype=torch.float32).to(device)
+        dones = torch.tensor(dones, dtype=torch.float32).to(device)
 
-        returns = compute_returns(rewards, dones, gamma)
+        # Compute n-step returns
+        returns = compute_returns(rewards, dones, values, gamma).to(device)
+
+        # Compute the policy loss
         policy_loss = -(returns.detach() * torch.stack(log_probs)).mean()
-        
+
+        # Critic's loss (value function loss)
         value_preds = critic(states).squeeze()
         value_loss = F.mse_loss(value_preds, returns)
 
+        # Once the entire episode is completed, backpropagate and optimize
         optimizer_actor.zero_grad()
         policy_loss.backward()
         optimizer_actor.step()
@@ -123,38 +134,27 @@ def train_actor_critic(lr_critic, seed=0):
 
     return rewards_all
 
+
 if __name__ == "__main__":
     results = {}
-    for lr_critic in lrs_critic:
-        print(lr_critic)
+    for lr in lrs_critic:
+        print(lr)
         all_rewards = []
         for run in range(NUM_RUNS):
-            rewards = train_actor_critic(lr_critic, seed=run)
+            rewards = run_ac(lr_critic=lr, seed=run)
             all_rewards.append(rewards)
         avg_reward = np.nanmean(all_rewards, axis=0)
         std_reward = np.nanstd(all_rewards, axis=0)
         
-        results[lr_critic] = {
+        df = pd.DataFrame({
+            'episode': np.arange(max_episodes),
             'avg_reward': avg_reward,
             'std_reward': std_reward,
-        }
-
-
-    dfs = []
-    for lr in lrs_critic:
-        df = pd.DataFrame({
-            'lr': [lr] * max_episodes,
-            'episode': np.arange(max_episodes),
-            'avg_reward': results[lr]['avg_reward'],
-            'std_reward': results[lr]['std_reward'],
         })
-        dfs.append(df)
+        os.makedirs('./results', exist_ok=True)
+        csv_path = './results/ac_lr_results.csv'
+        df.to_csv(csv_path, index=False)
 
-    final_df = pd.concat(dfs)
-    os.makedirs('./results', exist_ok=True)
-    csv_path = './results/ac_lr_results.csv'
-    final_df.to_csv(csv_path, index=False)
-
-    print(f"\nResults saved to {csv_path}")
-    print("\nSummary:")
-    print(final_df['avg_reward'].agg(['mean', 'max']))
+        print(f"\nResults saved to {csv_path}")
+        print("\nSummary:")
+        print(df['avg_reward'].agg(['mean', 'max']))
