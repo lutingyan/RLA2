@@ -136,7 +136,7 @@ def run_ac(lr_critic, seed):
 
 
 if __name__ == "__main__":
-    results = {}
+    all_results = []  # Create a list to store all results
     for lr in lrs_critic:
         print(lr)
         all_rewards = []
@@ -147,14 +147,21 @@ if __name__ == "__main__":
         std_reward = np.nanstd(all_rewards, axis=0)
         
         df = pd.DataFrame({
+            'lr': [lr] * max_episodes,
             'episode': np.arange(max_episodes),
             'avg_reward': avg_reward,
             'std_reward': std_reward,
         })
-        os.makedirs('./results', exist_ok=True)
-        csv_path = './results/ac_lr_results.csv'
-        df.to_csv(csv_path, index=False)
+        all_results.append(df)  # Append each result to the list
 
-        print(f"\nResults saved to {csv_path}")
-        print("\nSummary:")
-        print(df['avg_reward'].agg(['mean', 'max']))
+    # Concatenate all results from different n_steps into a single DataFrame
+    final_df = pd.concat(all_results, ignore_index=True)
+
+    # Save all results to a single CSV file
+    os.makedirs('./results', exist_ok=True)
+    csv_path = './results/ac_lr_results.csv'
+    final_df.to_csv(csv_path, index=False)
+
+    print(f"\nResults saved to {csv_path}")
+    print("\nSummary:")
+    print(final_df.groupby('nstep')['avg_reward'].agg(['mean', 'max']))

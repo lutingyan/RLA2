@@ -33,7 +33,7 @@ class Actor(nn.Module):
         x = F.relu(self.fc2(x))
         return F.softmax(self.fc3(x), dim=-1)
 
-    def get_action(self, state):
+    def act(self, state):
         state = torch.FloatTensor(state)
         probs = self.forward(state)
         dist = torch.distributions.Categorical(probs)
@@ -53,21 +53,24 @@ class Critic(nn.Module):
         x = F.relu(self.fc2(x))
         return self.fc3(x)
 
-def compute_returns(rewards, dones, gamma=0.99, n_steps=5):
+def compute_returns(rewards, dones, values, gamma=0.99, n_steps=10):
     returns = np.zeros(len(rewards), dtype=np.float32)
-    last_return = 0
-
-    for t in reversed(range(len(rewards))):
-        if t + n_steps < len(rewards):
-            returns[t] = rewards[t] + gamma * returns[t + 1] * (1 - dones[t])
-        else:
-            returns[t] = rewards[t] + last_return * (1 - dones[t])
-        last_return = returns[t]
-
+    T = len(rewards)
+    for t in range(T):
+        R = 0
+        step_count = 0
+        for k in range(t, min(t + n_steps, T)):
+            R += (gamma ** step_count) * rewards[k]
+            step_count += 1
+            if dones[k]: 
+                break
+        if (k < T - 1) and not dones[k]:
+            R += (gamma ** step_count) * values[k + 1]
+        returns[t] = R
     return torch.FloatTensor(returns)
 
 
-def train_actor_critic(n_step, seed=0):
+def run_ac(n_steps, seed):
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
@@ -85,8 +88,9 @@ def train_actor_critic(n_step, seed=0):
         episode_rewards = []
         episode_steps = 0
 
+        # Collecting trajectory data
         while not done:
-            action, log_prob = actor.get_action(state)
+            action, log_prob = actor.act(state)
             next_state, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
             state_tensor = torch.FloatTensor(state).unsqueeze(0)
@@ -105,12 +109,17 @@ def train_actor_critic(n_step, seed=0):
         values = np.array(values)
         dones = np.array(dones)
 
-        returns = compute_returns(rewards, dones, gamma, n_step)
+        # Compute n-step returns
+        returns = compute_returns(rewards, dones, values, gamma, n_steps)
+
+        # Compute the policy loss
         policy_loss = -(returns.detach() * torch.stack(log_probs)).mean()
-        
+
+        # Critic's loss (value function loss)
         value_preds = critic(states).squeeze()
         value_loss = F.mse_loss(value_preds, returns)
 
+        # Once the entire episode is completed, backpropagate and optimize
         optimizer_actor.zero_grad()
         policy_loss.backward()
         optimizer_actor.step()
@@ -126,35 +135,35 @@ def train_actor_critic(n_step, seed=0):
 
 
 if __name__ == "__main__":
-    results = {}
+    all_results = []  # Create a list to store all results
     for n_step in n_steps:
-        print(n_step)
+        print(f"Running with n_step={n_step}")
         all_rewards = []
         for run in range(NUM_RUNS):
-            rewards = train_actor_critic(n_step, seed=run)
+            rewards = run_ac(seed=run, n_steps=n_step)
             all_rewards.append(rewards)
+        
         avg_reward = np.nanmean(all_rewards, axis=0)
         std_reward = np.nanstd(all_rewards, axis=0)
-        results[n_step] = {
+
+        # Store the results in a DataFrame with `nstep` included as a column
+        df = pd.DataFrame({
+            'nstep': [n_step] * max_episodes,  # Repeat n_step for all episodes
+            'episode': np.arange(max_episodes),
             'avg_reward': avg_reward,
             'std_reward': std_reward,
-        }
-    
-    dfs = []
-    for n_step in n_steps:
-        df = pd.DataFrame({
-            'n_step': [n_step] * max_episodes,
-            'episode': np.arange(max_episodes),
-            'avg_reward': results[n_step]['avg_reward'],
-            'std_reward': results[n_step]['std_reward'],
         })
-        dfs.append(df)
+        
+        all_results.append(df)  # Append each result to the list
 
-    final_df = pd.concat(dfs)
+    # Concatenate all results from different n_steps into a single DataFrame
+    final_df = pd.concat(all_results, ignore_index=True)
+
+    # Save all results to a single CSV file
     os.makedirs('./results', exist_ok=True)
-    csv_path = './results/ac_n_step_results.csv'
+    csv_path = './results/ac_nstep_results.csv'
     final_df.to_csv(csv_path, index=False)
 
     print(f"\nResults saved to {csv_path}")
     print("\nSummary:")
-    print(final_df['avg_reward'].agg(['mean', 'max']))
+    print(final_df.groupby('nstep')['avg_reward'].agg(['mean', 'max']))
