@@ -8,6 +8,9 @@ import torch.nn.functional as F
 import pandas as pd
 import os
 
+# Check if GPU is available
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 env = gym.make('CartPole-v1')
 state_dim = env.observation_space.shape[0]
 action_dim = env.action_space.n
@@ -32,7 +35,7 @@ class PolicyNetwork(nn.Module):
         return F.softmax(self.fc3(x), dim=-1)
 
     def act(self, state):
-        state = torch.FloatTensor(state).unsqueeze(0)
+        state = torch.FloatTensor(state).unsqueeze(0).to(device)  # Move state to the selected device
         with torch.no_grad():  
             probs = self.forward(state)
             dist = torch.distributions.Categorical(probs)
@@ -41,7 +44,7 @@ class PolicyNetwork(nn.Module):
 
 
 def run_reinforce(seed=0):
-    policy = PolicyNetwork(state_dim, action_dim, hidden_dim)
+    policy = PolicyNetwork(state_dim, action_dim, hidden_dim).to(device)  # Move model to device
     optimizer = optim.Adam(policy.parameters(), lr=fixed_lr)
     scores = []
     steps_per_episode = []
@@ -75,7 +78,7 @@ def run_reinforce(seed=0):
             R = sum(gamma**(k-t) * episode_data['rewards'][k] for k in range(t, len(episode_data['rewards'])))
 
             # Dynamic log_prob calculation
-            state_t = torch.FloatTensor(episode_data['states'][t]).unsqueeze(0)
+            state_t = torch.FloatTensor(episode_data['states'][t]).unsqueeze(0).to(device)  # Move state to device
             probs_t = policy.forward(state_t)
             dist_t = torch.distributions.Categorical(probs_t)
             log_prob_t = dist_t.log_prob(episode_data['actions'][t])
@@ -92,9 +95,6 @@ def run_reinforce(seed=0):
             print(f'Episode {episode}, Reward: {scores[-1]:.1f}')
 
     return scores, steps_per_episode
-
-
-
 
 
 if __name__ == "__main__":
