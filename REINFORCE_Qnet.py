@@ -142,7 +142,7 @@ if __name__ == "__main__":
         'std_reward': std_reward,
     })
     os.makedirs('./results', exist_ok=True)
-    csv_path = './results/ac_results.csv'
+    csv_path = './results/Qnet_results.csv'
     df.to_csv(csv_path, index=False)
 
     print(f"\nResults saved to {csv_path}")
