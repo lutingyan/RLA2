@@ -54,21 +54,24 @@ class Critic(nn.Module):
         x = F.relu(self.fc3(x))
         return self.fc4(x)
 
-def compute_returns(rewards, dones, gamma=0.99, n_steps=10):
+def compute_returns(rewards, dones, values, gamma=0.99, n_steps=10):
     returns = np.zeros(len(rewards), dtype=np.float32)
-    last_return = 0
-
-    for t in reversed(range(len(rewards))):
-        if t + n_steps < len(rewards):
-            returns[t] = rewards[t] + gamma * returns[t + 1] * (1 - dones[t])
-        else:
-            returns[t] = rewards[t] + last_return * (1 - dones[t])
-        last_return = returns[t]
-
+    T = len(rewards)
+    for t in range(T):
+        R = 0
+        step_count = 0
+        for k in range(t, min(t + n_steps, T)):
+            R += (gamma ** step_count) * rewards[k]
+            step_count += 1
+            if dones[k]: 
+                break
+        if (k < T - 1) and not dones[k]:
+            R += (gamma ** step_count) * values[k + 1]
+        returns[t] = R
     return torch.FloatTensor(returns)
 
-# Actor-Critic 
-def train_actor_critic(seed=0):
+
+def run_ac(seed):
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
@@ -86,8 +89,9 @@ def train_actor_critic(seed=0):
         episode_rewards = []
         episode_steps = 0
 
+        # Collecting trajectory data
         while not done:
-            action, log_prob = actor.get_action(state)
+            action, log_prob = actor.act(state)
             next_state, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
             state_tensor = torch.FloatTensor(state).unsqueeze(0)
@@ -106,12 +110,17 @@ def train_actor_critic(seed=0):
         values = np.array(values)
         dones = np.array(dones)
 
-        returns = compute_returns(rewards, dones, gamma)
+        # Compute n-step returns
+        returns = compute_returns(rewards, dones, values, gamma, n_steps)
+
+        # Compute the policy loss
         policy_loss = -(returns.detach() * torch.stack(log_probs)).mean()
-        
+
+        # Critic's loss (value function loss)
         value_preds = critic(states).squeeze()
         value_loss = F.mse_loss(value_preds, returns)
 
+        # Once the entire episode is completed, backpropagate and optimize
         optimizer_actor.zero_grad()
         policy_loss.backward()
         optimizer_actor.step()
@@ -125,10 +134,11 @@ def train_actor_critic(seed=0):
 
     return rewards_all
 
+
 if __name__ == "__main__":
     all_rewards = []
     for run in range(NUM_RUNS):
-        rewards = train_actor_critic(seed=run)
+        rewards = run_ac(seed=run)
         all_rewards.append(rewards)
     avg_reward = np.nanmean(all_rewards, axis=0)
     std_reward = np.nanstd(all_rewards, axis=0)
