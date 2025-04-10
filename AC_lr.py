@@ -52,7 +52,7 @@ class Critic(nn.Module):
         x = F.relu(self.fc2(x))
         return self.fc3(x)
 
-def compute_returns(rewards, dones, values, gamma=0.99, n_steps=10):
+def compute_returns(rewards, dones, values, gamma=0.99, n_steps=20):
     returns = np.zeros(len(rewards), dtype=np.float32)
     T = len(rewards)
     for t in range(T):
