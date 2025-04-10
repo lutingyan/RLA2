@@ -92,7 +92,7 @@ def run_actor_critic_with_q(seed=0):
 
             # Calculate Advantage using the Q-network (Critic)
             state_t = torch.FloatTensor(episode_data['states'][t]).unsqueeze(0).to(device)
-            Q_t = q_net(state_t)  # Predicted Q-value for current state
+            Q_t = q_net(state_t).detach()  # Predicted Q-value for current state
             A_t = R - Q_t.item()  # Advantage function (difference between return and Q-value)
 
             # Update Actor (Policy network) using Advantage
@@ -106,12 +106,12 @@ def run_actor_critic_with_q(seed=0):
             optimizer_policy.zero_grad()
             loss.backward()
             optimizer_policy.step()
-
+            Q_preds = q_net(state_t)
             # Update Critic (Q network) using Bellman equation
             # next_state_t = torch.FloatTensor(state_t).unsqueeze(0).to(device)
             # next_q_value = q_net(next_state_t).detach()  # Get Q-value for next state
             # target_Q = R + gamma * next_q_value  # Bellman target
-            q_loss = F.mse_loss(Q_t, torch.tensor([[R]], device=device))  # MSE loss for Q-network
+            q_loss = F.mse_loss(Q_preds, torch.tensor([[R]], device=device))  # MSE loss for Q-network
 
             optimizer_q.zero_grad()
             q_loss.backward()
