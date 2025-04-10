@@ -106,7 +106,7 @@ def run_reinforce_with_q_baseline(seed=0):
             optimizer_policy.zero_grad()
             loss.backward()
             optimizer_policy.step()
-            q_loss = F.mse_loss(Q_t, torch.tensor([[R]], device=device))  # Ensure target shape matches Q_t
+            q_loss = F.mse_loss(torch.tensor([Q_t], device=device), torch.tensor([[R]], device=device))
             optimizer_q.zero_grad()
             q_loss.backward()
             optimizer_q.step()
