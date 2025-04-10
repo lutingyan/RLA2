@@ -91,8 +91,8 @@ def run_reinforce_with_q_baseline(seed=0):
 
             # Advantage calculation using Q-network
             state_t = torch.FloatTensor(episode_data['states'][t]).unsqueeze(0).to(device)  # Move state to device
-            Q_t = q_net(state_t).item()  # Get Q-value for the state
-            A_t = R - Q_t  # Advantage function
+            Q_t = q_net(state_t)  # Get Q-value for the state
+            A_t = R - Q_t.item()  # Advantage function (convert Q_t to scalar)
 
             # Dynamic log_prob calculation
             probs_t = policy.forward(state_t)
@@ -106,7 +106,11 @@ def run_reinforce_with_q_baseline(seed=0):
             optimizer_policy.zero_grad()
             loss.backward()
             optimizer_policy.step()
-            q_loss = F.mse_loss(torch.tensor([Q_t], device=device), torch.tensor([[R]], device=device))
+
+            # Update Q network (ensure R is a tensor with requires_grad=True)
+            Q_t = q_net(state_t)  # Predicted Q value
+            R_tensor = torch.tensor([R], device=device, requires_grad=True)  # Ensure R has requires_grad=True
+            q_loss = F.mse_loss(Q_t, R_tensor)  # MSE loss for Q-network
             optimizer_q.zero_grad()
             q_loss.backward()
             optimizer_q.step()
@@ -115,6 +119,7 @@ def run_reinforce_with_q_baseline(seed=0):
             print(f'Episode {episode}, Reward: {scores[-1]:.1f}')
 
     return scores, steps_per_episode
+
 
 
 if __name__ == "__main__":
