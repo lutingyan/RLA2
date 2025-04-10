@@ -73,10 +73,8 @@ def run_ac(lr_critic, seed):
     np.random.seed(seed)
     random.seed(seed)
     
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
-    actor = Actor(state_dim, action_dim, hidden_dim).to(device)
-    critic = Critic(state_dim, hidden_dim).to(device)
+    actor = Actor(state_dim, action_dim, hidden_dim)
+    critic = Critic(state_dim, hidden_dim)
     optimizer_actor = optim.Adam(actor.parameters(), lr=lr_actor)
     optimizer_critic = optim.Adam(critic.parameters(), lr=lr_critic)
 
@@ -91,7 +89,7 @@ def run_ac(lr_critic, seed):
 
         # Collecting trajectory data
         while not done:
-            state_tensor = torch.FloatTensor(state).unsqueeze(0).to(device)  # Ensure state is on the correct device
+            state_tensor = torch.FloatTensor(state).unsqueeze(0)  # Ensure state is on the correct device
             action, log_prob = actor.act(state)
             next_state, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
@@ -105,13 +103,13 @@ def run_ac(lr_critic, seed):
         rewards_all.append(total_reward)
 
         states, rewards, values, log_probs, dones = zip(*episode_data)
-        states = torch.FloatTensor(np.array(states)).to(device)
-        rewards = torch.tensor(rewards, dtype=torch.float32).to(device)
-        values = torch.tensor(values, dtype=torch.float32).to(device)
-        dones = torch.tensor(dones, dtype=torch.float32).to(device)
+        states = torch.FloatTensor(np.array(states))
+        rewards = torch.tensor(rewards, dtype=torch.float32)
+        values = torch.tensor(values, dtype=torch.float32)
+        dones = torch.tensor(dones, dtype=torch.float32)
 
         # Compute n-step returns
-        returns = compute_returns(rewards, dones, values, gamma).to(device)
+        returns = compute_returns(rewards, dones, values, gamma)
 
         # Compute the policy loss
         policy_loss = -(returns.detach() * torch.stack(log_probs)).mean()
