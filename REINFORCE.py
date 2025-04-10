@@ -33,7 +33,7 @@ class PolicyNetwork(nn.Module):
 
     def act(self, state):
         state = torch.FloatTensor(state).unsqueeze(0)
-        with torch.no_grad():  # 动作选择不记录梯度
+        with torch.no_grad():  
             probs = self.forward(state)
             dist = torch.distributions.Categorical(probs)
             action = dist.sample()
