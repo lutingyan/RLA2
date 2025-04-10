@@ -18,6 +18,7 @@ hidden_dim = 128
 max_episodes = 2000
 NUM_RUNS = 5
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class PolicyNetwork(nn.Module):
     def __init__(self, state_dim, action_dim, hidden_dim):
