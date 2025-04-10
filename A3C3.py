@@ -32,7 +32,7 @@ class Actor(nn.Module):
         x = F.relu(self.fc2(x))
         return F.softmax(self.fc3(x), dim=-1)
 
-    def get_action(self, state):
+    def act(self, state):
         state = torch.FloatTensor(state)
         probs = self.forward(state)
         dist = torch.distributions.Categorical(probs)
