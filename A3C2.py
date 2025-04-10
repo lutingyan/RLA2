@@ -51,7 +51,7 @@ class Critic(nn.Module):
         x = F.relu(self.fc1(x))
         return self.fc2(x)
     
-def compute_returns(rewards, dones, values, gamma=0.99, n_steps=10):
+def compute_returns(rewards, dones, values, gamma=0.99, n_steps=20):
     returns = np.zeros(len(rewards), dtype=np.float32)
     T = len(rewards)
     for t in range(T):
@@ -108,7 +108,7 @@ def run_ac(seed):
         dones = np.array(dones)
 
         # Compute n-step returns
-        returns = compute_returns(rewards, dones, values, gamma, n_steps)
+        returns = compute_returns(rewards, dones, values, gamma)
 
         # Compute the policy loss
         policy_loss = -(returns.detach() * torch.stack(log_probs)).mean()

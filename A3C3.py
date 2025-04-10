@@ -109,7 +109,7 @@ def run_ac(seed):
         dones = np.array(dones)
 
         # Compute n-step returns
-        returns = compute_returns(rewards, dones, values, gamma, n_steps)
+        returns = compute_returns(rewards, dones, values, gamma)
 
         # Compute the policy loss
         policy_loss = -(returns.detach() * torch.stack(log_probs)).mean()
