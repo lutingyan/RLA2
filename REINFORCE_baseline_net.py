@@ -84,14 +84,6 @@ def run_reinforce_with_q_baseline(seed=0):
 
         scores.append(sum(episode_data['rewards']))
 
-        # Compute the baseline using Q-network
-        # Calculate Q-value for the initial state (using Q network)
-        baseline = 0  # You can also use the average of Q values during the episode
-        for t in range(len(episode_data['rewards'])):
-            state_t = torch.FloatTensor(episode_data['states'][t]).unsqueeze(0).to(device)  # Move state to device
-            baseline += q_net(state_t).item()  # Sum Q-values for each state
-        baseline /= len(episode_data['rewards'])  # Average Q-value across the episode
-
         # Update the policy step-by-step using Advantage
         for t in range(len(episode_data['rewards'])):
             # Calculate the return R_t at time step t
@@ -114,13 +106,7 @@ def run_reinforce_with_q_baseline(seed=0):
             optimizer_policy.zero_grad()
             loss.backward()
             optimizer_policy.step()
-
-        # Update Q network using the return
-        for t in range(len(episode_data['rewards'])):
-            state_t = torch.FloatTensor(episode_data['states'][t]).unsqueeze(0).to(device)
-            R = sum(gamma**(k-t) * episode_data['rewards'][k] for k in range(t, len(episode_data['rewards'])))
-            Q_t = q_net(state_t)  # Predicted Q value
-            q_loss = F.mse_loss(Q_t, torch.tensor([R], device=device))  # MSE loss for Q-network
+            q_loss = F.mse_loss(Q_t, torch.tensor([[R]], device=device))  # Ensure target shape matches Q_t
             optimizer_q.zero_grad()
             q_loss.backward()
             optimizer_q.step()
