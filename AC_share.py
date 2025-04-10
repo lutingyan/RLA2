@@ -42,7 +42,7 @@ class Actor(nn.Module):
         x = self.shared_network(x)
         return F.softmax(self.fc_out(x), dim=-1)
 
-    def get_action(self, state):
+    def act(self, state):
         state = torch.FloatTensor(state)
         probs = self.forward(state)
         dist = torch.distributions.Categorical(probs)
@@ -60,37 +60,31 @@ class Critic(nn.Module):
         x = self.shared_network(x)
         return self.fc_out(x)
 
-def compute_returns(rewards, dones, gamma=0.99, n_steps=10):
+def compute_returns(rewards, dones, values, gamma=0.99, n_steps=20):
     returns = np.zeros(len(rewards), dtype=np.float32)
-    last_return = 0
-
-    for t in reversed(range(len(rewards))):
-        if t + n_steps < len(rewards):
-            returns[t] = rewards[t] + gamma * returns[t + 1] * (1 - dones[t])
-        else:
-            returns[t] = rewards[t] + last_return * (1 - dones[t])
-        last_return = returns[t]
-
+    T = len(rewards)
+    for t in range(T):
+        R = 0
+        step_count = 0
+        for k in range(t, min(t + n_steps, T)):
+            R += (gamma ** step_count) * rewards[k]
+            step_count += 1
+            if dones[k]: 
+                break
+        if (k < T - 1) and not dones[k]:
+            R += (gamma ** step_count) * values[k + 1]
+        returns[t] = R
     return torch.FloatTensor(returns)
 
 
-# Actor-Critic 
-def train_actor_critic(seed=0):
+def run_ac(seed):
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
-
-    shared_network = SharedNetwork(state_dim, hidden_dim)
-
-    actor = Actor(shared_network, action_dim)
-    critic = Critic(shared_network)
-
-    # 3 optimizers
-    optimizer = optim.Adam([
-        {'params': shared_network.parameters(), 'lr': lr_critic},
-        {'params': actor.fc_out.parameters(), 'lr': lr_actor},
-        {'params': critic.fc_out.parameters(), 'lr': lr_critic}
-    ])
+    actor = Actor(state_dim, action_dim, hidden_dim)
+    critic = Critic(state_dim, hidden_dim)
+    optimizer_actor = optim.Adam(actor.parameters(), lr=lr_actor)
+    optimizer_critic = optim.Adam(critic.parameters(), lr=lr_critic)
 
     rewards_all = []
 
@@ -101,8 +95,9 @@ def train_actor_critic(seed=0):
         episode_rewards = []
         episode_steps = 0
 
+        # Collecting trajectory data
         while not done:
-            action, log_prob = actor.get_action(state)
+            action, log_prob = actor.act(state)
             next_state, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
             state_tensor = torch.FloatTensor(state).unsqueeze(0)
@@ -120,27 +115,36 @@ def train_actor_critic(seed=0):
         rewards = np.array(rewards)
         values = np.array(values)
         dones = np.array(dones)
-        returns = compute_returns(rewards, dones, gamma)
+
+        # Compute n-step returns
+        returns = compute_returns(rewards, dones, values, gamma, n_steps)
+
+        # Compute the policy loss
         policy_loss = -(returns.detach() * torch.stack(log_probs)).mean()
-            
+
+        # Critic's loss (value function loss)
         value_preds = critic(states).squeeze()
         value_loss = F.mse_loss(value_preds, returns)
 
-        # integrate gradient
-        optimizer.zero_grad()
-        value_loss.backward()
+        # Once the entire episode is completed, backpropagate and optimize
+        optimizer_actor.zero_grad()
         policy_loss.backward()
-        optimizer.step()
+        optimizer_actor.step()
+
+        optimizer_critic.zero_grad()
+        value_loss.backward()
+        optimizer_critic.step()
 
         if episode % 100 == 0:
             print(f'Episode {episode}, Reward: {rewards_all[-1]:.1f}')
 
     return rewards_all
 
+
 if __name__ == "__main__":
     all_rewards = []
     for run in range(NUM_RUNS):
-        rewards = train_actor_critic(seed=run)
+        rewards = run_ac(seed=run)
         all_rewards.append(rewards)
     avg_reward = np.nanmean(all_rewards, axis=0)
     std_reward = np.nanstd(all_rewards, axis=0)
@@ -151,7 +155,7 @@ if __name__ == "__main__":
         'std_reward': std_reward,
     })
     os.makedirs('./results', exist_ok=True)
-    csv_path = './results/ac_share_results.csv'
+    csv_path = './results/ac_results.csv'
     df.to_csv(csv_path, index=False)
 
     print(f"\nResults saved to {csv_path}")
