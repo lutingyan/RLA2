@@ -106,13 +106,22 @@ if __name__ == "__main__":
         all_scores.append(scores)
         all_steps.append(steps)
 
+    # Pad or truncate all_runs to the same length
+    max_len = max(len(run) for run in all_scores)  # Find the maximum length across runs
+
+    # Ensure all runs have the same length by padding with NaN or truncating
+    all_scores = [run + [np.nan] * (max_len - len(run)) for run in all_scores]
+    all_steps = [run + [0] * (max_len - len(run)) for run in all_steps]
+
     avg_reward = np.nanmean(all_scores, axis=0)
     std_reward = np.nanstd(all_scores, axis=0)
+
+    # Calculate cumulative steps
     cum_steps = np.cumsum(all_steps[0])
 
     df = pd.DataFrame({
-        'gamma': [gamma] * max_episodes,
-        'episode': np.arange(max_episodes),
+        'gamma': [gamma] * max_len,
+        'episode': np.arange(max_len),
         'avg_reward': avg_reward,
         'std_reward': std_reward,
         'cum_steps': cum_steps
