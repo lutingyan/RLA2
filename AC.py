@@ -4,20 +4,21 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-import matplotlib.pyplot as plt
 import random
 import pandas as pd
 import os
+
 env = gym.make('CartPole-v1')
 state_dim = env.observation_space.shape[0]
 action_dim = env.action_space.n
 gamma = 0.99
-n_steps = 10
+n_steps = 20
 lr_actor = 1e-4
 lr_critic = 0.001
 hidden_dim = 128
 max_episodes = 2000
 NUM_RUNS = 5
+
 
 class Actor(nn.Module):
     def __init__(self, state_dim, action_dim, hidden_dim):
@@ -52,17 +53,20 @@ class Critic(nn.Module):
         return self.fc3(x)
 
 
-def compute_returns(rewards, dones, gamma=0.99, n_steps=10):
+def compute_returns(rewards, dones, values, gamma=0.99, n_steps=10):
     returns = np.zeros(len(rewards), dtype=np.float32)
-    last_return = 0
-
-    for t in reversed(range(len(rewards))):
-        if t + n_steps < len(rewards):
-            returns[t] = rewards[t] + gamma * returns[t + 1] * (1 - dones[t])
-        else:
-            returns[t] = rewards[t] + last_return * (1 - dones[t])
-        last_return = returns[t]
-
+    T = len(rewards)
+    for t in range(T):
+        R = 0
+        step_count = 0
+        for k in range(t, min(t + n_steps, T)):
+            R += (gamma ** step_count) * rewards[k]
+            step_count += 1
+            if dones[k]: 
+                break
+        if (k < T - 1) and not dones[k]:
+            R += (gamma ** step_count) * values[k + 1]
+        returns[t] = R
     return torch.FloatTensor(returns)
 
 
@@ -84,6 +88,7 @@ def run_ac(seed):
         episode_rewards = []
         episode_steps = 0
 
+        # Collecting trajectory data
         while not done:
             action, log_prob = actor.act(state)
             next_state, reward, terminated, truncated, _ = env.step(action)
@@ -104,14 +109,17 @@ def run_ac(seed):
         values = np.array(values)
         dones = np.array(dones)
 
-        # n-step
-        returns = compute_returns(rewards, dones, gamma, n_steps)
-        # only value
+        # Compute n-step returns
+        returns = compute_returns(rewards, dones, values, gamma, n_steps)
+
+        # Compute the policy loss
         policy_loss = -(returns.detach() * torch.stack(log_probs)).mean()
-        
+
+        # Critic's loss (value function loss)
         value_preds = critic(states).squeeze()
         value_loss = F.mse_loss(value_preds, returns)
 
+        # Once the entire episode is completed, backpropagate and optimize
         optimizer_actor.zero_grad()
         policy_loss.backward()
         optimizer_actor.step()
