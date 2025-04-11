@@ -37,7 +37,7 @@ class PolicyNetwork(nn.Module):
         return F.softmax(self.fc3(x), dim=-1)
 
     def act(self, state):
-        state = torch.FloatTensor(state).to(device)  # Ensure state is on the same device as the model
+        state = torch.FloatTensor(state).unsqueeze(0).to(device)  # Ensure state is on the same device as the model
         probs = self.forward(state)
         dist = torch.distributions.Categorical(probs)
         action = dist.sample()
@@ -71,7 +71,7 @@ def compute_returns(rewards, dones, values, gamma=0.99, n_steps=5):
         if (k < T - 1) and not dones[k]:
             R += (gamma ** step_count) * values[k + 1]
         returns[t] = R
-    return torch.FloatTensor(returns)
+    return torch.FloatTensor(returns).to(device)
 
 def run_reinforce_with_Net(seed=0):
     actor = PolicyNetwork(state_dim, action_dim, hidden_dim).to(device)
@@ -95,7 +95,7 @@ def run_reinforce_with_Net(seed=0):
             action, log_prob = actor.act(state)
             next_state, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
-            state_tensor = torch.FloatTensor(state).to(device)  # Ensure state is on the same device as the model
+            state_tensor = torch.FloatTensor(state).unsqueeze(0).to(device)  # Ensure state is on the same device as the model
             value = critic(state_tensor).item()  # Get the value from the critic
             episode_data.append((state, reward, value, log_prob, done))
             episode_reward.append(reward)
@@ -108,7 +108,7 @@ def run_reinforce_with_Net(seed=0):
                 eval_state, _ = env.reset(seed=seed)
                 done_eval = False
                 while not done_eval:
-                    state_tensor = torch.tensor(eval_state, dtype=torch.float32).unsqueeze(0).to(device, non_blocking=True)
+                    state_tensor = torch.tensor(eval_state, dtype=torch.float32).unsqueeze(0).to(device)
                     with torch.no_grad():
                         probs = actor(state_tensor)
                     action = torch.argmax(probs, dim=-1).item()
@@ -124,7 +124,7 @@ def run_reinforce_with_Net(seed=0):
         states, rewards, values, log_probs, dones = zip(*episode_data)
         states = torch.FloatTensor(np.array(states)).to(device)  # Ensure states are on the correct device
         rewards = np.array(rewards)
-        values = np.array(values)
+        values = torch.tensor(values, dtype=torch.float32, device=device)
         dones = np.array(dones)
         log_probs = [lp.to(device) for lp in log_probs]
 
