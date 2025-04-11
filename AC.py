@@ -126,6 +126,7 @@ def run_reinforce_with_Net(seed=0):
         rewards = np.array(rewards)
         values = np.array(values)
         dones = np.array(dones)
+        log_probs = [lp.to(device) for lp in log_probs]
 
         # Compute n-step returns
         returns = compute_returns(rewards, dones, values, gamma)
