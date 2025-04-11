@@ -37,7 +37,7 @@ class PolicyNetwork(nn.Module):
         return F.softmax(self.fc3(x), dim=-1)
 
     def act(self, state):
-        state = torch.FloatTensor(state).to(device)
+        state = torch.FloatTensor(state).to(device)  # Ensure state is on the same device as the model
         probs = self.forward(state)
         dist = torch.distributions.Categorical(probs)
         action = dist.sample()
@@ -56,18 +56,7 @@ class Critic(nn.Module):
         x = F.relu(self.fc2(x))
         return self.fc3(x)
 
-class Critic(nn.Module):
-    def __init__(self, state_dim, hidden_dim):
-        super().__init__()
-        self.fc1 = nn.Linear(state_dim, hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-        self.fc3 = nn.Linear(hidden_dim, 1)
 
-    def forward(self, x):
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        return self.fc3(x)
-    
 def compute_returns(rewards, dones, values, gamma=0.99, n_steps=10):
     T = len(rewards)
     returns = np.zeros(T, dtype=np.float32)
@@ -76,9 +65,9 @@ def compute_returns(rewards, dones, values, gamma=0.99, n_steps=10):
         for k in range(t, T):
             R += (gamma ** (k - t)) * rewards[k]
         returns[t] = R
-    return torch.FloatTensor(returns).to(device)
+    return torch.FloatTensor(returns).to(device)  # Ensure returns are on the same device
 
-    
+
 def run_reinforce_with_Net(seed=0):
     actor = PolicyNetwork(state_dim, action_dim, hidden_dim).to(device)
     critic = Critic(state_dim, hidden_dim).to(device)
@@ -101,8 +90,8 @@ def run_reinforce_with_Net(seed=0):
             action, log_prob = actor.act(state)
             next_state, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
-            state_tensor = torch.FloatTensor(state).unsqueeze(0)
-            value = critic(state_tensor).item()
+            state_tensor = torch.FloatTensor(state).to(device)  # Ensure state is on the same device as the model
+            value = critic(state_tensor).item()  # Get the value from the critic
             episode_data.append((state, reward, value, log_prob, done))
             episode_reward.append(reward)
             state = next_state
@@ -128,7 +117,7 @@ def run_reinforce_with_Net(seed=0):
 
         # Ensure states are numeric before processing them
         states, rewards, values, log_probs, dones = zip(*episode_data)
-        states = torch.FloatTensor(np.array(states)).to(device)
+        states = torch.FloatTensor(np.array(states)).to(device)  # Ensure states are on the correct device
         rewards = np.array(rewards)
         values = np.array(values)
         dones = np.array(dones)
