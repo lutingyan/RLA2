@@ -59,7 +59,7 @@ def run_reinforce_with_baselineNet(seed=0):
     policy = PolicyNetwork(state_dim, action_dim, hidden_dim).to(device)
     q_net = QNetwork(state_dim, hidden_dim).to(device)
     optimizer_policy = optim.Adam(policy.parameters(), lr=fixed_lr)
-    optimizer_q = optim.Adam(q_net.parameters(), lr=0.001)
+    optimizer_q = optim.Adam(q_net.parameters(), lr=fixed_lr)
     episode_rewards = []
     eval_scores = []
     eval_steps = []
