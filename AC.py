@@ -187,7 +187,7 @@ if __name__ == "__main__":
         'std_reward': std_eval_scores
     })
     os.makedirs('./results', exist_ok=True)
-    df_eval.to_csv('./results/reinforce_Q_score.csv', index=False)
+    df_eval.to_csv('./results/reinforce_ac_score.csv', index=False)
     
     df = pd.DataFrame({
         'steps': all_eval_steps[0],  # Use eval_steps as the steps
@@ -196,7 +196,7 @@ if __name__ == "__main__":
     })
 
     os.makedirs('./results', exist_ok=True)
-    df.to_csv('./results/reinforce_Q_results.csv', index=False)
+    df.to_csv('./results/reinforce_ac_results.csv', index=False)
 
     print("\nResults saved to ./results/")
     print("\nSummary:")
