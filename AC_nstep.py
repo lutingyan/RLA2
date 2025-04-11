@@ -23,8 +23,8 @@ n_steps = [1, 5, 10, 20]
 gamma = 0.99
 
 hidden_dim = 128
-max_steps = int(1e4)
-NUM_RUNS = 1
+max_steps = int(1e6)
+NUM_RUNS = 5
 
 class PolicyNetwork(nn.Module):
     def __init__(self, state_dim, action_dim, hidden_dim):
