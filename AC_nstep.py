@@ -23,8 +23,8 @@ n_steps = [1, 5, 10, 20]
 gamma = 0.99
 
 hidden_dim = 128
-max_steps = int(1e6)
-NUM_RUNS = 5
+max_steps = int(1e4)
+NUM_RUNS = 1
 
 class PolicyNetwork(nn.Module):
     def __init__(self, state_dim, action_dim, hidden_dim):
@@ -157,7 +157,7 @@ if __name__ == "__main__":
     all_eval_steps = []
     all_steps = []
 
-    for n_step in n_steps:  # Loop over n_steps
+    for i, n_step in enumerate(n_steps):  # Loop over n_steps
         scores, eval_scores, eval_steps = run_reinforce_with_Net(seed=0, n_steps=n_step)
         all_scores.append(scores)
         all_eval_scores.append(eval_scores)
@@ -179,39 +179,9 @@ if __name__ == "__main__":
         
         # Save training CSV for each n_step, including std_reward
         df_train = pd.DataFrame({
-            'episode': np.arange(len(scores)),
+            'steps': all_eval_steps[i],
             'reward': scores,
             'std_reward': std_reward
         })
         df_train.to_csv(f'./results/reinforce_ac_train_nstep{n_step}.csv', index=False)
 
-    # After the loop, handle the evaluation results
-    max_eval_len = max(len(run) for run in all_eval_scores)
-    all_eval_scores = [run + [np.nan] * (max_eval_len - len(run)) for run in all_eval_scores]
-    all_eval_steps = [run + [np.nan] * (max_eval_len - len(run)) for run in all_eval_steps]
-
-    # Calculate mean and std for each step
-    avg_eval_scores = np.nanmean(all_eval_scores, axis=0)
-    std_eval_scores = np.nanstd(all_eval_scores, axis=0)
-
-    # Construct DataFrame for evaluation results
-    df_eval = pd.DataFrame({
-        'steps': all_eval_steps[0],  # Ensure that eval_steps corresponds to eval_scores
-        'avg_reward': avg_eval_scores,
-        'std_reward': std_eval_scores
-    })
-    os.makedirs('./results', exist_ok=True)
-    df_eval.to_csv('./results/reinforce_ac_score_nstep.csv', index=False)
-
-    df = pd.DataFrame({
-        'steps': all_eval_steps[0],  # Use eval_steps as the steps
-        'avg_reward': avg_reward,
-        'std_reward': std_reward
-    })
-
-    os.makedirs('./results', exist_ok=True)
-    df.to_csv('./results/reinforce_ac_results_nstep.csv', index=False)
-
-    print("\nResults saved to ./results/")
-    print("\nSummary:")
-    print(df[['avg_reward']].agg(['mean', 'max']))
