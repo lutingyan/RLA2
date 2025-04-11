@@ -11,7 +11,7 @@ import os
 # ✅ GPU acceleration flags
 torch.backends.cudnn.benchmark = True
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 env = gym.make('CartPole-v1')
 state_dim = env.observation_space.shape[0]
@@ -37,7 +37,7 @@ class PolicyNetwork(nn.Module):
         return F.softmax(self.fc3(x), dim=-1)
 
     def act(self, state):
-        state = torch.FloatTensor(state).unsqueeze(0).to(device)  # Ensure state is on the same device as the model
+        state = torch.FloatTensor(state)  # Ensure state is on the same device as the model
         probs = self.forward(state)
         dist = torch.distributions.Categorical(probs)
         action = dist.sample()
@@ -57,7 +57,7 @@ class Critic(nn.Module):
         return self.fc3(x)
 
 
-def compute_returns(rewards, dones, values, gamma=0.99, n_steps=5):
+def compute_returns(rewards, dones, values, gamma=0.99, n_steps=10):
     returns = np.zeros(len(rewards), dtype=np.float32)
     T = len(rewards)
     for t in range(T):
@@ -71,11 +71,11 @@ def compute_returns(rewards, dones, values, gamma=0.99, n_steps=5):
         if (k < T - 1) and not dones[k]:
             R += (gamma ** step_count) * values[k + 1]
         returns[t] = R
-    return torch.FloatTensor(returns).to(device)
+    return torch.FloatTensor(returns)
 
 def run_reinforce_with_Net(seed=0):
-    actor = PolicyNetwork(state_dim, action_dim, hidden_dim).to(device)
-    critic = Critic(state_dim, hidden_dim).to(device)
+    actor = PolicyNetwork(state_dim, action_dim, hidden_dim)
+    critic = Critic(state_dim, hidden_dim)
     optimizer_actor = optim.Adam(actor.parameters(), lr=lr_actor)
     optimizer_critic = optim.Adam(critic.parameters(), lr=lr_critic)
     episode_rewards = []
@@ -95,7 +95,7 @@ def run_reinforce_with_Net(seed=0):
             action, log_prob = actor.act(state)
             next_state, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
-            state_tensor = torch.FloatTensor(state).unsqueeze(0).to(device)  # Ensure state is on the same device as the model
+            state_tensor = torch.FloatTensor(state)  # Ensure state is on the same device as the model
             value = critic(state_tensor).item()  # Get the value from the critic
             episode_data.append((state, reward, value, log_prob, done))
             episode_reward.append(reward)
@@ -108,7 +108,7 @@ def run_reinforce_with_Net(seed=0):
                 eval_state, _ = env.reset(seed=seed)
                 done_eval = False
                 while not done_eval:
-                    state_tensor = torch.tensor(eval_state, dtype=torch.float32).unsqueeze(0).to(device)
+                    state_tensor = torch.tensor(eval_state, dtype=torch.float32).unsqueeze(0)
                     with torch.no_grad():
                         probs = actor(state_tensor)
                     action = torch.argmax(probs, dim=-1).item()
@@ -122,11 +122,10 @@ def run_reinforce_with_Net(seed=0):
 
         # Ensure states are numeric before processing them
         states, rewards, values, log_probs, dones = zip(*episode_data)
-        states = torch.FloatTensor(np.array(states)).to(device)  # Ensure states are on the correct device
+        states = torch.FloatTensor(np.array(states))  # Ensure states are on the correct device
         rewards = np.array(rewards)
-        values = torch.tensor(values, dtype=torch.float32, device=device)
+        values = np.array(values)
         dones = np.array(dones)
-        log_probs = [lp.to(device) for lp in log_probs]
 
         # Compute n-step returns
         returns = compute_returns(rewards, dones, values, gamma)
@@ -188,7 +187,7 @@ if __name__ == "__main__":
         'std_reward': std_eval_scores
     })
     os.makedirs('./results', exist_ok=True)
-    df_eval.to_csv('./results/reinforce_ac_score.csv', index=False)
+    df_eval.to_csv('./results/reinforce_Q_score.csv', index=False)
     
     df = pd.DataFrame({
         'steps': all_eval_steps[0],  # Use eval_steps as the steps
@@ -197,7 +196,7 @@ if __name__ == "__main__":
     })
 
     os.makedirs('./results', exist_ok=True)
-    df.to_csv('./results/reinforce_ac_results.csv', index=False)
+    df.to_csv('./results/reinforce_Q_results.csv', index=False)
 
     print("\nResults saved to ./results/")
     print("\nSummary:")
