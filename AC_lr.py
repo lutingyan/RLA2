@@ -177,38 +177,9 @@ if __name__ == "__main__":
         
         # Save training CSV for each learning rate, including std_reward
         df_train = pd.DataFrame({
-            'episode': np.arange(len(scores)),
+            'steps': all_eval_steps[i],
             'reward': scores,
             'std_reward': std_reward
         })
         df_train.to_csv(f'./results/reinforce_ac_train_lr{lr_critic}.csv', index=False)
 
-    max_eval_len = max(len(run) for run in all_eval_scores)
-    all_eval_scores = [run + [np.nan] * (max_eval_len - len(run)) for run in all_eval_scores]
-    all_eval_steps = [run + [np.nan] * (max_eval_len - len(run)) for run in all_eval_steps]
-
-    # Calculate mean and std for each step
-    avg_eval_scores = np.nanmean(all_eval_scores, axis=0)
-    std_eval_scores = np.nanstd(all_eval_scores, axis=0)
-
-    # Construct DataFrame for evaluation results
-    df_eval = pd.DataFrame({
-        'steps': all_eval_steps[0],  # Ensure that eval_steps corresponds to eval_scores
-        'avg_reward': avg_eval_scores,
-        'std_reward': std_eval_scores
-    })
-    os.makedirs('./results', exist_ok=True)
-    df_eval.to_csv('./results/reinforce_ac_score.csv', index=False)
-    
-    df = pd.DataFrame({
-        'steps': all_eval_steps[0],  # Use eval_steps as the steps
-        'avg_reward': avg_reward,
-        'std_reward': std_reward
-    })
-
-    os.makedirs('./results', exist_ok=True)
-    df.to_csv('./results/reinforce_ac_results.csv', index=False)
-
-    print("\nResults saved to ./results/")
-    print("\nSummary:")
-    print(df[['avg_reward']].agg(['mean', 'max']))
