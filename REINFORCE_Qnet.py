@@ -37,7 +37,7 @@ class PolicyNetwork(nn.Module):
         return F.softmax(self.fc3(x), dim=-1)
 
     def act(self, state):
-        state = torch.FloatTensor(state)
+        state = torch.FloatTensor(state).to(device)
         probs = self.forward(state)
         dist = torch.distributions.Categorical(probs)
         action = dist.sample()
