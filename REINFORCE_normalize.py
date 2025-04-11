@@ -111,7 +111,7 @@ def run_reinforce_with_normalization(seed=0):
             dist_t = torch.distributions.Categorical(probs_t)
             log_prob_t = dist_t.log_prob(episode_data['actions'][t])
             R = normalized_returns[t]
-            loss = -log_prob_t * (gamma ** t) * R
+            loss = -log_prob_t * R
 
             optimizer.zero_grad()
             loss.backward()
