@@ -23,10 +23,6 @@ hidden_dim = 128
 max_steps = int(1e6)
 NUM_RUNS = 5
 
-# Precompute gamma powers
-max_episode_len = 1000
-gamma_powers = torch.tensor([gamma**t for t in range(max_episode_len)], dtype=torch.float32, device=device)
-
 class PolicyNetwork(nn.Module):
     def __init__(self, state_dim, action_dim, hidden_dim):
         super().__init__()
@@ -47,9 +43,10 @@ class PolicyNetwork(nn.Module):
             action = dist.sample()
         return action.item(), probs, action
 
-def run_reinforce(seed=0):
+def run_reinforce_with_normalization(seed=0):
     policy = PolicyNetwork(state_dim, action_dim, hidden_dim).to(device)
     optimizer = optim.Adam(policy.parameters(), lr=fixed_lr)
+
     episode_rewards = []
     eval_scores = []
     eval_steps = []
@@ -63,7 +60,7 @@ def run_reinforce(seed=0):
         episode_data = {'states': [], 'actions': [], 'probs': [], 'rewards': []}
         done = False
 
-        while not done and total_steps < max_steps:
+        while not done:
             action, probs, action_tensor = policy.act(state)
             next_state, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
@@ -75,7 +72,7 @@ def run_reinforce(seed=0):
             total_steps += 1
 
             # ✅ Evaluation logic inserted here
-            if total_steps > 1250 and total_steps % 250 == 0:
+            if total_steps >= 1250 and total_steps % 250 == 0:
                 eval_reward = 0
                 eval_state, _ = env.reset(seed=seed)
                 done_eval = False
@@ -90,39 +87,35 @@ def run_reinforce(seed=0):
                 eval_scores.append(eval_reward)
                 eval_steps.append(total_steps)
                 print(f"[Eval @ Step {total_steps}] Reward: {eval_reward}")
+                episode_rewards.append(sum(episode_data['rewards']))
+        
+        T = len(episode_data['rewards'])
+        # baseline = np.mean(episode_data['rewards'])
+        # Batch convert states
+        states_tensor = torch.tensor(episode_data['states'], dtype=torch.float32, device=device)
+        
         returns = []
         rewards = episode_data['rewards']
         for t in range(len(rewards)):
             R = sum(gamma ** (k - t) * rewards[k] for k in range(t, len(rewards)))
             returns.append(R)
-
-        # Normalize returns
         returns = np.array(returns)
         ret_mean = returns.mean()
         ret_std = returns.std()
         normalized_returns = (returns - ret_mean) / (ret_std + 1e-8)
 
-        episode_rewards.append(sum(episode_data['rewards']))
-        T = len(episode_data['rewards'])
-
-        # Batch convert states
-        states_tensor = torch.tensor(episode_data['states'], dtype=torch.float32, device=device)
         for t in range(T):
-            rewards = episode_data['rewards'][t:]
-            steps = len(rewards)
-            gammas = gamma_powers[:steps]
-            R = normalized_returns[t]
-
+            # R = sum(gamma**(k-t) * episode_data['rewards'][k] for k in range(t, len(episode_data['rewards'])))
             state_t = states_tensor[t].unsqueeze(0)
             probs_t = policy(state_t)
             dist_t = torch.distributions.Categorical(probs_t)
             log_prob_t = dist_t.log_prob(episode_data['actions'][t])
+            R = normalized_returns[t]
             loss = -log_prob_t * (gamma ** t) * R
 
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-
     return episode_rewards, eval_scores, eval_steps
 
 
@@ -133,7 +126,7 @@ if __name__ == "__main__":
     all_steps = []
 
     for run in range(NUM_RUNS):
-        scores, eval_scores, eval_steps = run_reinforce(seed=run)
+        scores, eval_scores, eval_steps = run_reinforce_with_normalization(seed=run)
         all_scores.append(scores)
         all_eval_scores.append(eval_scores)
         all_eval_steps.append(eval_steps)
@@ -144,32 +137,36 @@ if __name__ == "__main__":
     avg_reward = np.nanmean(all_scores, axis=0)
     std_reward = np.nanstd(all_scores, axis=0)
 
-    # 确保长度一致，通过填充 NaN
+    # Ensure length consistency by padding NaN
     avg_reward = np.pad(avg_reward, (0, max_len - len(avg_reward)), constant_values=np.nan)
     std_reward = np.pad(std_reward, (0, max_len - len(std_reward)), constant_values=np.nan)
-    cum_steps = np.cumsum(all_steps[0])
 
-    # 确保 cum_steps 长度与 max_len 一致
-    cum_steps = np.pad(cum_steps, (0, max_len - len(cum_steps)), constant_values=0)
 
+    max_eval_len = max(len(run) for run in all_eval_scores)
+    all_eval_scores = [run + [np.nan] * (max_eval_len - len(run)) for run in all_eval_scores]
+    all_eval_steps = [run + [np.nan] * (max_eval_len - len(run)) for run in all_eval_steps]
+
+    # Calculate mean and std for each step
+    avg_eval_scores = np.nanmean(all_eval_scores, axis=0)
+    std_eval_scores = np.nanstd(all_eval_scores, axis=0)
+
+    # Construct DataFrame for evaluation results
+    df_eval = pd.DataFrame({
+        'steps': all_eval_steps[0],  # Ensure that eval_steps corresponds to eval_scores
+        'avg_reward': avg_eval_scores,
+        'std_reward': std_eval_scores
+    })
+    os.makedirs('./results', exist_ok=True)
+    df_eval.to_csv('./results/reinforce_baselineQ_score.csv', index=False)
+    
     df = pd.DataFrame({
-        'gamma': [gamma] * max_len,
-        'steps': np.arange(max_len),
+        'steps': all_eval_steps[0],  # Use eval_steps as the steps
         'avg_reward': avg_reward,
-        'std_reward': std_reward,
-        'cum_steps': cum_steps
+        'std_reward': std_reward
     })
 
     os.makedirs('./results', exist_ok=True)
-    df.to_csv('./results/reinforce_normalize_scores.csv', index=False)
-
-    # ✅ Save eval results from first run
-    if all_eval_scores and all_eval_steps:
-        df_eval = pd.DataFrame({
-            'eval_step': all_eval_steps[0],
-            'eval_reward': all_eval_scores[0]
-        })
-        df_eval.to_csv('./results/reinforce_normalize_scores.csv', index=False)
+    df.to_csv('./results/reinforce_baselineQ_results.csv', index=False)
 
     print("\nResults saved to ./results/")
     print("\nSummary:")

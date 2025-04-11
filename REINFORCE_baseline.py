@@ -107,7 +107,7 @@ def run_reinforce_with_constant_baseline(seed=0):
 
             # Advantage with constant baseline
             A = R - baseline
-            loss = -log_prob_t * (gamma ** t) * A
+            loss = -log_prob_t * A
 
             optimizer.zero_grad()
             loss.backward()
