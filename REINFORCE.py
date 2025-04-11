@@ -83,23 +83,21 @@ def run_reinforce(seed=0):
             loss.backward()
             optimizer.step()
 
-        if total_steps >= 12500 and (total_steps - 12500) % 250 == 0:
-            eval_reward = 0
-            eval_state, _ = env.reset(seed=seed)
-            done = False
-            while not done:
-                state_tensor = torch.FloatTensor(eval_state).unsqueeze(0).to(device)
-                with torch.no_grad():
-                    probs = policy(state_tensor)
-                action = torch.argmax(probs, dim=-1).item()
-                eval_state, reward, terminated, truncated, _ = env.step(action)
-                eval_reward += reward
-                done = terminated or truncated
-            eval_scores.append(eval_reward)
-            eval_steps.append(total_steps)
-            print(f"[Eval @ Step {total_steps}] Reward: {eval_reward}")
-
-        # if total_steps % 100 == 0:
+            if t >= 12500 and (t-12500) % 250 == 0:
+                eval_reward = 0
+                eval_state, _ = env.reset(seed=seed)
+                done_eval = False
+                while not done_eval:
+                    state_tensor = torch.FloatTensor(eval_state).unsqueeze(0).to(device)
+                    with torch.no_grad():
+                        probs = policy(state_tensor)
+                    action = torch.argmax(probs, dim=-1).item()
+                    eval_state, reward, terminated, truncated, _ = env.step(action)
+                    eval_reward += reward
+                    done_eval = terminated or truncated
+                eval_scores.append(eval_reward)
+                eval_steps.append(total_steps)
+                print(f"[Eval @ Step {total_steps}] Reward: {eval_reward}")
         #     print(f'Steps {total_steps}, Reward: {episode_rewards[-1]:.1f}')
 
     return episode_rewards, eval_scores, eval_steps
