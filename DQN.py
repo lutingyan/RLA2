@@ -4,6 +4,8 @@ import numpy as np
 import tensorflow as tf
 import utils
 from collections import deque, namedtuple
+import pandas as pd
+import os
 
 from tensorflow.keras import Sequential
 from tensorflow.keras.layers import Dense, Input
@@ -17,18 +19,19 @@ ALPHA = 1e-4
 STEPS_FOR_UPDATE = 2
 EPSILON = 0.4
 
-TOTAL_STEPS = 1_000_000 
-NUM_RUNS = 5
+TOTAL_STEPS = 1_000_0  # Total steps to run
+NUM_RUNS = 2
 
 env = gym.make("CartPole-v1")
 MAX_TIMESTEPS = env.spec.max_episode_steps
-NUM_EPISODES = TOTAL_STEPS // MAX_TIMESTEPS
 
 state_size = env.observation_space.shape  # (4,)
 num_actions = env.action_space.n  # 2 (left, right)
 
-returns_per_episode = np.zeros((NUM_RUNS, NUM_EPISODES))  
-all_returns_per_step = []  
+# Initialize lists to store results
+all_eval_scores = []
+all_eval_steps = []
+all_returns_per_step = []
 
 for run in range(NUM_RUNS):
     random.seed(run)
@@ -39,6 +42,7 @@ for run in range(NUM_RUNS):
     Experience = namedtuple("Experience", field_names=["state", "action", "reward", "next_state", "done"])
     memory_buffer = deque(maxlen=BUFFER_SIZE)
 
+    # Create networks
     q_network = Sequential([
         Input(shape=state_size),
         Dense(units=128, activation='relu'),
@@ -52,6 +56,7 @@ for run in range(NUM_RUNS):
         Dense(units=128, activation='relu'),
         Dense(units=num_actions, activation='linear'),
     ])
+    
     optimizer = Adam(learning_rate=ALPHA)
     target_q_network.set_weights(q_network.get_weights()) 
 
@@ -74,15 +79,16 @@ for run in range(NUM_RUNS):
 
     total_steps = 0  
     epsilon = EPSILON
-    per_step_returns = [] 
+    all_returns = []  # Store returns for each step per run
     start_time = time.time()
-    
-    for episode in range(NUM_EPISODES):
+
+    while total_steps < TOTAL_STEPS:
         state, _ = env.reset(seed=run)
         episodic_return = 0
-        total_points = 0
+        episode_steps = 0  # Count steps in each episode
+        done = False
 
-        for t in range(MAX_TIMESTEPS):
+        while not done:
             state_qn = tf.convert_to_tensor(state, dtype=tf.float32)[None, :]
             q_values = q_network(state_qn)
             action = utils.get_action(q_values, epsilon)
@@ -90,40 +96,68 @@ for run in range(NUM_RUNS):
             next_state, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
             total_steps += 1
-            total_points += reward
+            episode_steps += 1
+            episodic_return += reward
 
             memory_buffer.append(Experience(state, action, reward, next_state, done))
-            if utils.check_update_conditions(t, STEPS_FOR_UPDATE, memory_buffer):
+            if utils.check_update_conditions(episode_steps, STEPS_FOR_UPDATE, memory_buffer):
                 experiences = utils.get_experiences(memory_buffer)
                 nn_update(experiences, GAMMA, optimizer)
                 utils.update_target_network(q_network, target_q_network, softupdate=True)
-            state = next_state.copy()
-            if done:
-                break
-        per_step_returns.append(total_points)        
-        returns_per_episode[run, episode] = total_points  
 
-        print(f"\rRun {run+1} | Episode {episode+1} | Total points: {total_points:.2f} | Steps: {total_steps}  ", end="")
+            state = next_state
 
-        if (episode + 1) % 100 == 0:
-            print(f"\rRun {run+1} | Episode {episode+1} | Total points: {total_points:.2f} | Steps: {total_steps}")
+            # Perform greedy evaluation every 250 steps after 1250 steps
+            if total_steps >= 1250 and total_steps % 250 == 0:
+                eval_reward = 0
+                eval_state, _ = env.reset(seed=run)
+                done_eval = False
+                while not done_eval:
+                    state_qn_eval = tf.convert_to_tensor(eval_state, dtype=tf.float32)[None, :]
+                    greedy_action = tf.argmax(q_network(state_qn_eval), axis=-1).numpy()[0]  # Greedy action selection
+                    eval_state, reward, terminated, truncated, _ = env.step(greedy_action)
+                    eval_reward += reward
+                    done_eval = terminated or truncated
+                
+                # Print and record episodic return, eval_reward, and steps
+                print(f"[Eval @ Step {total_steps}] Reward: {eval_reward}")
+                
+                all_eval_scores.append(eval_reward)
+                all_eval_steps.append(total_steps)
 
-        epsilon = utils.get_new_eps(epsilon)  # epsilon 
+                all_returns_per_step.extend([episodic_return] * episode_steps)
+
+        print(f"\rRun {run+1} | Total points: {episodic_return:.2f} | Steps: {total_steps}  ", end="")
 
         if total_steps >= TOTAL_STEPS:
             print(f"\n\nRun {run+1} completed!\n")
-            q_network.save(f"ET{run+1}.h5")
             break
 
-    all_returns_per_step.append(per_step_returns)  
+# Ensure all lengths are consistent for saving to CSV
+min_len = min(len(all_eval_steps), len(all_eval_scores), len(all_returns_per_step))
 
-all_returns_per_step = np.array(all_returns_per_step)
-average_per_step = np.nanmean(all_returns_per_step, axis=0)
-std_per_step = np.nanstd(all_returns_per_step, axis=0)
-np.save("TN_ER_softupdate_decay.npy", all_returns_per_step)
+# Save the evaluation results CSV
+df_eval = pd.DataFrame({
+    'eval_step': all_eval_steps[:min_len],
+    'avg_eval_reward': all_eval_scores[:min_len],
+    'std_eval_reward': [np.std(all_eval_scores)] * min_len
+})
 
+# Save the step-wise results CSV
+df_results = pd.DataFrame({
+    'steps': all_eval_steps[:min_len],
+    'avg_reward': all_returns_per_step[:min_len],
+    'std_reward': [np.std(all_returns_per_step)] * min_len
+})
 
-# utils.plot_history(average_per_step, std_dev=std_per_step)
+# Save both DataFrames into CSV
+os.makedirs('./results', exist_ok=True)
+df_eval.to_csv('./results/reinforce_DQN_score.csv', index=False)
+df_results.to_csv('./results/reinforce_DQN_results.csv', index=False)
+
+print(f"\nResults saved to ./results/")
+print(f"\nSummary:")
+print(df_results[['avg_reward']].agg(['mean', 'max']))
 
 total_time = time.time() - start_time
 print(f"\nTotal Runtime: {total_time:.2f} s ({(total_time/60):.2f} min)")
