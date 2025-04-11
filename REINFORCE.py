@@ -8,6 +8,9 @@ import torch.nn.functional as F
 import pandas as pd
 import os
 
+# ✅ GPU acceleration flags
+torch.backends.cudnn.benchmark = True
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 env = gym.make('CartPole-v1')
@@ -17,8 +20,12 @@ action_dim = env.action_space.n
 fixed_lr = 1e-4
 gamma = 0.99
 hidden_dim = 128
-max_steps = int(1e5)
+max_steps = int(1e6)
 NUM_RUNS = 5
+
+# Precompute gamma powers
+max_episode_len = 1000
+gamma_powers = torch.tensor([gamma**t for t in range(max_episode_len)], dtype=torch.float32, device=device)
 
 class PolicyNetwork(nn.Module):
     def __init__(self, state_dim, action_dim, hidden_dim):
@@ -33,7 +40,7 @@ class PolicyNetwork(nn.Module):
         return F.softmax(self.fc3(x), dim=-1)
 
     def act(self, state):
-        state = torch.FloatTensor(state).unsqueeze(0).to(device)
+        state = torch.as_tensor(state, dtype=torch.float32).unsqueeze(0).to(device)
         with torch.no_grad():
             probs = self.forward(state)
             dist = torch.distributions.Categorical(probs)
@@ -55,7 +62,6 @@ def run_reinforce(seed=0):
         state, _ = env.reset(seed=seed)
         episode_data = {'states': [], 'actions': [], 'probs': [], 'rewards': []}
         done = False
-        steps = 0
 
         while not done and total_steps < max_steps:
             action, probs, action_tensor = policy.act(state)
@@ -66,29 +72,15 @@ def run_reinforce(seed=0):
             episode_data['probs'].append(probs)
             episode_data['rewards'].append(reward)
             state = next_state
-            steps += 1
             total_steps += 1
 
-        episode_rewards.append(sum(episode_data['rewards']))
-
-        for t in range(len(episode_data['rewards'])):
-            R = sum(gamma**(k-t) * episode_data['rewards'][k] for k in range(t, len(episode_data['rewards'])))
-            state_t = torch.FloatTensor(episode_data['states'][t]).unsqueeze(0).to(device)
-            probs_t = policy.forward(state_t)
-            dist_t = torch.distributions.Categorical(probs_t)
-            log_prob_t = dist_t.log_prob(episode_data['actions'][t])
-            loss = -log_prob_t * (gamma ** t) * R
-
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-            if t >= 12500 and (t-12500) % 250 == 0:
+            # ✅ Evaluation logic inserted here
+            if total_steps > 1250 and total_steps % 250 == 0:
                 eval_reward = 0
                 eval_state, _ = env.reset(seed=seed)
                 done_eval = False
                 while not done_eval:
-                    state_tensor = torch.FloatTensor(eval_state).unsqueeze(0).to(device)
+                    state_tensor = torch.tensor(eval_state, dtype=torch.float32).unsqueeze(0).to(device, non_blocking=True)
                     with torch.no_grad():
                         probs = policy(state_tensor)
                     action = torch.argmax(probs, dim=-1).item()
@@ -98,9 +90,30 @@ def run_reinforce(seed=0):
                 eval_scores.append(eval_reward)
                 eval_steps.append(total_steps)
                 print(f"[Eval @ Step {total_steps}] Reward: {eval_reward}")
-        #     print(f'Steps {total_steps}, Reward: {episode_rewards[-1]:.1f}')
+
+        episode_rewards.append(sum(episode_data['rewards']))
+        T = len(episode_data['rewards'])
+
+        # Batch convert states
+        states_tensor = torch.tensor(episode_data['states'], dtype=torch.float32, device=device)
+        for t in range(T):
+            rewards = episode_data['rewards'][t:]
+            steps = len(rewards)
+            gammas = gamma_powers[:steps]
+            R = sum(gammas[:steps].cpu().numpy() * np.array(rewards))
+
+            state_t = states_tensor[t].unsqueeze(0)
+            probs_t = policy(state_t)
+            dist_t = torch.distributions.Categorical(probs_t)
+            log_prob_t = dist_t.log_prob(episode_data['actions'][t])
+            loss = -log_prob_t * (gamma ** t) * R
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
 
     return episode_rewards, eval_scores, eval_steps
+
 
 if __name__ == "__main__":
     all_scores = []
@@ -119,7 +132,14 @@ if __name__ == "__main__":
     all_scores = [run + [np.nan] * (max_len - len(run)) for run in all_scores]
     avg_reward = np.nanmean(all_scores, axis=0)
     std_reward = np.nanstd(all_scores, axis=0)
+
+    # 确保长度一致，通过填充 NaN
+    avg_reward = np.pad(avg_reward, (0, max_len - len(avg_reward)), constant_values=np.nan)
+    std_reward = np.pad(std_reward, (0, max_len - len(std_reward)), constant_values=np.nan)
     cum_steps = np.cumsum(all_steps[0])
+
+    # 确保 cum_steps 长度与 max_len 一致
+    cum_steps = np.pad(cum_steps, (0, max_len - len(cum_steps)), constant_values=0)
 
     df = pd.DataFrame({
         'gamma': [gamma] * max_len,
@@ -132,7 +152,7 @@ if __name__ == "__main__":
     os.makedirs('./results', exist_ok=True)
     df.to_csv('./results/reinforce_results.csv', index=False)
 
-    # Save eval results (first run for simplicity)
+    # ✅ Save eval results from first run
     if all_eval_scores and all_eval_steps:
         df_eval = pd.DataFrame({
             'eval_step': all_eval_steps[0],
