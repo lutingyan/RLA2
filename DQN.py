@@ -19,8 +19,8 @@ ALPHA = 1e-4
 STEPS_FOR_UPDATE = 2
 EPSILON = 0.4
 
-TOTAL_STEPS = 1_000_0  # Total steps to run
-NUM_RUNS = 2
+TOTAL_STEPS = 1_000_000  # Total steps to run
+NUM_RUNS = 5
 
 env = gym.make("CartPole-v1")
 MAX_TIMESTEPS = env.spec.max_episode_steps
