@@ -76,7 +76,7 @@ def compute_returns(rewards, dones, values, gamma=0.99, n_steps=10):
         for k in range(t, T):
             R += (gamma ** (k - t)) * rewards[k]
         returns[t] = R
-    return torch.FloatTensor(returns)
+    return torch.FloatTensor(returns).to(device)
 
     
 def run_reinforce_with_Net(seed=0):
@@ -128,7 +128,7 @@ def run_reinforce_with_Net(seed=0):
 
         # Ensure states are numeric before processing them
         states, rewards, values, log_probs, dones = zip(*episode_data)
-        states = torch.FloatTensor(np.array(states))
+        states = torch.FloatTensor(np.array(states)).to(device)
         rewards = np.array(rewards)
         values = np.array(values)
         dones = np.array(dones)
