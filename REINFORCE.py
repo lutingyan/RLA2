@@ -8,7 +8,6 @@ import torch.nn.functional as F
 import pandas as pd
 import os
 
-# Check if GPU is available
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 env = gym.make('CartPole-v1')
@@ -18,9 +17,8 @@ action_dim = env.action_space.n
 fixed_lr = 1e-4
 gamma = 0.99
 hidden_dim = 128
-max_episodes = 2000
+max_steps = int(1e5)
 NUM_RUNS = 5
-
 
 class PolicyNetwork(nn.Module):
     def __init__(self, state_dim, action_dim, hidden_dim):
@@ -35,31 +33,31 @@ class PolicyNetwork(nn.Module):
         return F.softmax(self.fc3(x), dim=-1)
 
     def act(self, state):
-        state = torch.FloatTensor(state).unsqueeze(0).to(device)  # Move state to the selected device
-        with torch.no_grad():  
+        state = torch.FloatTensor(state).unsqueeze(0).to(device)
+        with torch.no_grad():
             probs = self.forward(state)
             dist = torch.distributions.Categorical(probs)
             action = dist.sample()
         return action.item(), probs, action
 
-
 def run_reinforce(seed=0):
-    policy = PolicyNetwork(state_dim, action_dim, hidden_dim).to(device)  # Move model to device
+    policy = PolicyNetwork(state_dim, action_dim, hidden_dim).to(device)
     optimizer = optim.Adam(policy.parameters(), lr=fixed_lr)
-    scores = []
-    steps_per_episode = []
+    episode_rewards = []
+    eval_scores = []
+    eval_steps = []
+    total_steps = 0
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-    for episode in range(max_episodes):
+    while total_steps < max_steps:
         state, _ = env.reset(seed=seed)
         episode_data = {'states': [], 'actions': [], 'probs': [], 'rewards': []}
         done = False
         steps = 0
 
-        # Store trajectory (states, actions, probs, rewards)
-        while not done:
+        while not done and total_steps < max_steps:
             action, probs, action_tensor = policy.act(state)
             next_state, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
@@ -69,68 +67,81 @@ def run_reinforce(seed=0):
             episode_data['rewards'].append(reward)
             state = next_state
             steps += 1
+            total_steps += 1
 
-        scores.append(sum(episode_data['rewards']))
+        episode_rewards.append(sum(episode_data['rewards']))
 
-        # Update the policy step-by-step
         for t in range(len(episode_data['rewards'])):
-            # Calculate the return R_t at time step t
             R = sum(gamma**(k-t) * episode_data['rewards'][k] for k in range(t, len(episode_data['rewards'])))
-
-            # Dynamic log_prob calculation
-            state_t = torch.FloatTensor(episode_data['states'][t]).unsqueeze(0).to(device)  # Move state to device
+            state_t = torch.FloatTensor(episode_data['states'][t]).unsqueeze(0).to(device)
             probs_t = policy.forward(state_t)
             dist_t = torch.distributions.Categorical(probs_t)
             log_prob_t = dist_t.log_prob(episode_data['actions'][t])
-
-            # Loss function: policy gradient loss
             loss = -log_prob_t * (gamma ** t) * R
 
-            # Backpropagation and policy update
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
-        if episode % 100 == 0:
-            print(f'Episode {episode}, Reward: {scores[-1]:.1f}')
+        if total_steps >= 12500 and (total_steps - 12500) % 250 == 0:
+            eval_reward = 0
+            eval_state, _ = env.reset(seed=seed)
+            done = False
+            while not done:
+                state_tensor = torch.FloatTensor(eval_state).unsqueeze(0).to(device)
+                with torch.no_grad():
+                    probs = policy(state_tensor)
+                action = torch.argmax(probs, dim=-1).item()
+                eval_state, reward, terminated, truncated, _ = env.step(action)
+                eval_reward += reward
+                done = terminated or truncated
+            eval_scores.append(eval_reward)
+            eval_steps.append(total_steps)
+            print(f"[Eval @ Step {total_steps}] Reward: {eval_reward}")
 
-    return scores, steps_per_episode
+        # if total_steps % 100 == 0:
+        #     print(f'Steps {total_steps}, Reward: {episode_rewards[-1]:.1f}')
 
+    return episode_rewards, eval_scores, eval_steps
 
 if __name__ == "__main__":
     all_scores = []
+    all_eval_scores = []
+    all_eval_steps = []
     all_steps = []
 
     for run in range(NUM_RUNS):
-        scores, steps = run_reinforce(seed=run)
+        scores, eval_scores, eval_steps = run_reinforce(seed=run)
         all_scores.append(scores)
-        all_steps.append(steps)
+        all_eval_scores.append(eval_scores)
+        all_eval_steps.append(eval_steps)
+        all_steps.append(len(scores))
 
-    # Pad or truncate all_runs to the same length
-    max_len = max(len(run) for run in all_scores)  # Find the maximum length across runs
-
-    # Ensure all runs have the same length by padding with NaN or truncating
+    max_len = max(len(run) for run in all_scores)
     all_scores = [run + [np.nan] * (max_len - len(run)) for run in all_scores]
-    all_steps = [run + [0] * (max_len - len(run)) for run in all_steps]
-
     avg_reward = np.nanmean(all_scores, axis=0)
     std_reward = np.nanstd(all_scores, axis=0)
-
-    # Calculate cumulative steps
     cum_steps = np.cumsum(all_steps[0])
 
     df = pd.DataFrame({
         'gamma': [gamma] * max_len,
-        'episode': np.arange(max_len),
+        'steps': np.arange(max_len),
         'avg_reward': avg_reward,
         'std_reward': std_reward,
         'cum_steps': cum_steps
     })
 
     os.makedirs('./results', exist_ok=True)
-    csv_path = './results/reinforce_results.csv'
-    df.to_csv(csv_path, index=False)
+    df.to_csv('./results/reinforce_results.csv', index=False)
 
-    print(f"\nResults saved to {csv_path}")
+    # Save eval results (first run for simplicity)
+    if all_eval_scores and all_eval_steps:
+        df_eval = pd.DataFrame({
+            'eval_step': all_eval_steps[0],
+            'eval_reward': all_eval_scores[0]
+        })
+        df_eval.to_csv('./results/reinforce_eval_scores.csv', index=False)
+
+    print("\nResults saved to ./results/")
     print("\nSummary:")
-    print(df['avg_reward'].agg(['mean', 'max']))
+    print(df[['avg_reward']].agg(['mean', 'max']))
