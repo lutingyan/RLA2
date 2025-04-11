@@ -9,15 +9,15 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import os
 
-env = gym.make('CartPole-v1', render_mode=None)
+env = gym.make('CartPole-v1')
 state_dim = env.observation_space.shape[0]
 action_dim = env.action_space.n
 
-gamma = 0.99
 lr_actor = 1e-4
-lr_critic = 0.001  # Critic higher
-hidden_dim = 128 
-max_episodes = 2000
+lr_critic = 0.001
+gamma = 0.99
+hidden_dim = 128
+max_steps = int(1e6)
 NUM_RUNS = 5
 
 class Actor(nn.Module):
@@ -68,42 +68,56 @@ def compute_returns(rewards, dones, values, gamma=0.99, n_steps=10):
         returns[t] = R
     return torch.FloatTensor(returns)
 
-
-def run_ac(seed):
-    torch.manual_seed(seed)
-    np.random.seed(seed)
-    random.seed(seed)
+def run_reinforce_with_Net(seed=0):
     actor = Actor(state_dim, action_dim, hidden_dim)
     critic = Critic(state_dim, hidden_dim)
     optimizer_actor = optim.Adam(actor.parameters(), lr=lr_actor)
     optimizer_critic = optim.Adam(critic.parameters(), lr=lr_critic)
+    episode_rewards = []
+    eval_scores = []
+    eval_steps = []
+    total_steps = 0
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
 
-    rewards_all = []
-
-    for episode in range(max_episodes):
-        state, _ = env.reset()
-        done = False
+    while total_steps < max_steps:
+        state, _ = env.reset(seed=seed)
         episode_data = []
-        episode_rewards = []
-        episode_steps = 0
-
-        # Collecting trajectory data
+        done = False
+        episode_reward = []
         while not done:
             action, log_prob = actor.act(state)
             next_state, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
-            state_tensor = torch.FloatTensor(state).unsqueeze(0)
-            value = critic(state_tensor).item()
+            state_tensor = torch.FloatTensor(state)  # Ensure state is on the same device as the model
+            value = critic(state_tensor).item()  # Get the value from the critic
             episode_data.append((state, reward, value, log_prob, done))
-            episode_rewards.append(reward)
+            episode_reward.append(reward)
             state = next_state
-            episode_steps += 1
+            total_steps += 1
 
-        total_reward = sum(episode_rewards)
-        rewards_all.append(total_reward)
+            # ✅ Evaluation logic inserted here
+            if total_steps >= 1250 and total_steps % 250 == 0:
+                eval_reward = 0
+                eval_state, _ = env.reset(seed=seed)
+                done_eval = False
+                while not done_eval:
+                    state_tensor = torch.tensor(eval_state, dtype=torch.float32).unsqueeze(0)
+                    with torch.no_grad():
+                        probs = actor(state_tensor)
+                    action = torch.argmax(probs, dim=-1).item()
+                    eval_state, reward, terminated, truncated, _ = env.step(action)
+                    eval_reward += reward
+                    done_eval = terminated or truncated
+                eval_scores.append(eval_reward)
+                eval_steps.append(total_steps)
+                print(f"[Eval @ Step {total_steps}] Reward: {eval_reward}")
+                episode_rewards.append(sum(episode_reward))
 
+        # Ensure states are numeric before processing them
         states, rewards, values, log_probs, dones = zip(*episode_data)
-        states = torch.FloatTensor(np.array(states))
+        states = torch.FloatTensor(np.array(states))  # Ensure states are on the correct device
         rewards = np.array(rewards)
         values = np.array(values)
         dones = np.array(dones)
@@ -127,29 +141,58 @@ def run_ac(seed):
         value_loss.backward()
         optimizer_critic.step()
 
-        if episode % 100 == 0:
-            print(f'Episode {episode}, Reward: {rewards_all[-1]:.1f}')
-
-    return rewards_all
+    return episode_rewards, eval_scores, eval_steps
 
 
 if __name__ == "__main__":
-    all_rewards = []
+    all_scores = []
+    all_eval_scores = []
+    all_eval_steps = []
+    all_steps = []
+
     for run in range(NUM_RUNS):
-        rewards = run_ac(seed=run)
-        all_rewards.append(rewards)
-    avg_reward = np.nanmean(all_rewards, axis=0)
-    std_reward = np.nanstd(all_rewards, axis=0)
-    
-    df = pd.DataFrame({
-        'episode': np.arange(max_episodes),
-        'avg_reward': avg_reward,
-        'std_reward': std_reward,
+        scores, eval_scores, eval_steps = run_reinforce_with_Net(seed=run)
+        all_scores.append(scores)
+        all_eval_scores.append(eval_scores)
+        all_eval_steps.append(eval_steps)
+        all_steps.append(len(scores))
+
+    max_len = max(len(run) for run in all_scores)
+    all_scores = [run + [np.nan] * (max_len - len(run)) for run in all_scores]
+    avg_reward = np.nanmean(all_scores, axis=0)
+    std_reward = np.nanstd(all_scores, axis=0)
+
+    # Ensure length consistency by padding NaN
+    avg_reward = np.pad(avg_reward, (0, max_len - len(avg_reward)), constant_values=np.nan)
+    std_reward = np.pad(std_reward, (0, max_len - len(std_reward)), constant_values=np.nan)
+
+
+    max_eval_len = max(len(run) for run in all_eval_scores)
+    all_eval_scores = [run + [np.nan] * (max_eval_len - len(run)) for run in all_eval_scores]
+    all_eval_steps = [run + [np.nan] * (max_eval_len - len(run)) for run in all_eval_steps]
+
+    # Calculate mean and std for each step
+    avg_eval_scores = np.nanmean(all_eval_scores, axis=0)
+    std_eval_scores = np.nanstd(all_eval_scores, axis=0)
+
+    # Construct DataFrame for evaluation results
+    df_eval = pd.DataFrame({
+        'steps': all_eval_steps[0],  # Ensure that eval_steps corresponds to eval_scores
+        'avg_reward': avg_eval_scores,
+        'std_reward': std_eval_scores
     })
     os.makedirs('./results', exist_ok=True)
-    csv_path = './results/a3c3_results.csv'
-    df.to_csv(csv_path, index=False)
+    df_eval.to_csv('./results/reinforce_a3c3_score.csv', index=False)
+    
+    df = pd.DataFrame({
+        'steps': all_eval_steps[0],  # Use eval_steps as the steps
+        'avg_reward': avg_reward,
+        'std_reward': std_reward
+    })
 
-    print(f"\nResults saved to {csv_path}")
+    os.makedirs('./results', exist_ok=True)
+    df.to_csv('./results/reinforce_a3c3_results.csv', index=False)
+
+    print("\nResults saved to ./results/")
     print("\nSummary:")
-    print(df['avg_reward'].agg(['mean', 'max']))
+    print(df[['avg_reward']].agg(['mean', 'max']))
