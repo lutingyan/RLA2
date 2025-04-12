@@ -19,8 +19,8 @@ ALPHA = 1e-4
 STEPS_FOR_UPDATE = 2
 EPSILON = 0.4
 
-TOTAL_STEPS = 1_000_0  # Total steps to run
-NUM_RUNS = 2
+TOTAL_STEPS = 1_000_000  # Total steps to run
+NUM_RUNS = 5
 
 env = gym.make("CartPole-v1")
 MAX_TIMESTEPS = env.spec.max_episode_steps
@@ -149,7 +149,7 @@ for run_idx in range(NUM_RUNS):
     step_reward = dict(zip(all_eval_steps[run_idx], all_train_rewards[run_idx]))
     for col_idx, step in enumerate(common_eval_steps):
         train_matrix[run_idx, col_idx] = step_reward.get(step, np.nan)
-        
+
 # 生成最终DataFrame
 df_eval = pd.DataFrame({
     'step': common_eval_steps,
@@ -166,5 +166,5 @@ df_train = pd.DataFrame({
 # 保存结果
 os.makedirs('./results', exist_ok=True)
 df_eval.to_csv('./results/eval_greedy_scores.csv', index=False)
-df_train.to_csv('./results/train_returns.csv', index=False)
+df_train.to_csv('./results/dqn_train_returns.csv', index=False)
 print("数据已保存至 ./results/ 目录")
