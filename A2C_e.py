@@ -76,7 +76,7 @@ def compute_advantages_and_returns(rewards, values, dones, gamma=0.99, n_steps=5
         advantages.append(R - values[t])
     return torch.FloatTensor(advantages), torch.FloatTensor(returns)
 
-def run_reinforce_with_Net(seed, clip=False, entropy=False, entropy_weight=0.01):
+def run_reinforce_with_Net(seed, clip=False, entropy=False, entropy_weight=0.001):
     actor = Actor(state_dim, action_dim, hidden_dim)
     critic = Critic(state_dim, hidden_dim)
     optimizer_actor = optim.Adam(actor.parameters(), lr=lr_actor)
