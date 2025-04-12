@@ -19,8 +19,8 @@ ALPHA = 1e-4
 STEPS_FOR_UPDATE = 2
 EPSILON = 0.4
 
-TOTAL_STEPS = 1_000_000  # Total steps to run
-NUM_RUNS = 5
+TOTAL_STEPS = 1_000_0  # Total steps to run
+NUM_RUNS = 2
 
 env = gym.make("CartPole-v1")
 MAX_TIMESTEPS = env.spec.max_episode_steps
@@ -28,10 +28,9 @@ MAX_TIMESTEPS = env.spec.max_episode_steps
 state_size = env.observation_space.shape  # (4,)
 num_actions = env.action_space.n  # 2 (left, right)
 
-# Initialize lists to store results
-all_eval_scores = []
-all_eval_steps = []
-all_returns_per_step = []
+all_train_rewards = []  # 每个元素是一个列表，记录单次运行中每个step的回报
+all_eval_scores = []    # 每个元素是一个列表，记录单次运行的评估结果（分数）
+all_eval_steps = []     # 每个元素是一个列表，记录单次运行的评估时间点（步骤）
 
 for run in range(NUM_RUNS):
     random.seed(run)
@@ -81,6 +80,9 @@ for run in range(NUM_RUNS):
     epsilon = EPSILON
     all_returns = []  # Store returns for each step per run
     start_time = time.time()
+    run_train_rewards = []  # 仅在评估时记录训练回报
+    run_eval_scores = []    # 记录评估分数
+    run_eval_steps = []     # 记录评估步骤
 
     while total_steps < TOTAL_STEPS:
         state, _ = env.reset(seed=run)
@@ -107,7 +109,9 @@ for run in range(NUM_RUNS):
 
             state = next_state
 
-            # Perform greedy evaluation every 250 steps after 1250 steps
+            run_train_rewards.append(episodic_return)  # 注意这里需要根据具体需求调整
+            
+            # 评估逻辑
             if total_steps >= 1250 and total_steps % 250 == 0:
                 eval_reward = 0
                 eval_state, _ = env.reset(seed=run)
@@ -119,45 +123,48 @@ for run in range(NUM_RUNS):
                     eval_reward += reward
                     done_eval = terminated or truncated
                 
-                # Print and record episodic return, eval_reward, and steps
+                run_eval_scores.append(eval_reward)
+                run_eval_steps.append(total_steps)
                 print(f"[Eval @ Step {total_steps}] Reward: {eval_reward}")
                 
-                all_eval_scores.append(eval_reward)
-                all_eval_steps.append(total_steps)
+                # 同时记录当前训练回报
+                run_train_rewards.append(episodic_return)
 
-                all_returns_per_step.extend([episodic_return] * episode_steps)
+    all_train_rewards.append(run_train_rewards)
+    all_eval_scores.append(run_eval_scores)
+    all_eval_steps.append(run_eval_steps)
 
-        print(f"\rRun {run+1} | Total points: {episodic_return:.2f} | Steps: {total_steps}  ", end="")
+common_eval_steps = sorted(list(set(step for run_steps in all_eval_steps for step in run_steps)))
 
-        if total_steps >= TOTAL_STEPS:
-            print(f"\n\nRun {run+1} completed!\n")
-            break
+# 构建评估矩阵（确保维度正确）
+eval_matrix = np.full((NUM_RUNS, len(common_eval_steps)), np.nan)
+for run_idx in range(NUM_RUNS):
+    step_score = dict(zip(all_eval_steps[run_idx], all_eval_scores[run_idx]))
+    for col_idx, step in enumerate(common_eval_steps):
+        eval_matrix[run_idx, col_idx] = step_score.get(step, np.nan)
 
-# Ensure all lengths are consistent for saving to CSV
-min_len = min(len(all_eval_steps), len(all_eval_scores), len(all_returns_per_step))
-
-# Save the evaluation results CSV
+train_matrix = np.full((NUM_RUNS, len(common_eval_steps)), np.nan)
+for run_idx in range(NUM_RUNS):
+    # 确保使用相同长度的列表
+    step_reward = dict(zip(all_eval_steps[run_idx], all_train_rewards[run_idx]))
+    for col_idx, step in enumerate(common_eval_steps):
+        train_matrix[run_idx, col_idx] = step_reward.get(step, np.nan)
+        
+# 生成最终DataFrame
 df_eval = pd.DataFrame({
-    'eval_step': all_eval_steps[:min_len],
-    'avg_eval_reward': all_eval_scores[:min_len],
-    'std_eval_reward': [np.std(all_eval_scores)] * min_len
+    'step': common_eval_steps,
+    'avg_eval_reward': np.nanmean(eval_matrix, axis=0),
+    'std_eval_reward': np.nanstd(eval_matrix, axis=0)
 })
 
-# Save the step-wise results CSV
-df_results = pd.DataFrame({
-    'steps': all_eval_steps[:min_len],
-    'avg_reward': all_returns_per_step[:min_len],
-    'std_reward': [np.std(all_returns_per_step)] * min_len
+df_train = pd.DataFrame({
+    'step': common_eval_steps,
+    'avg_train_reward': np.nanmean(train_matrix, axis=0),
+    'std_train_reward': np.nanstd(train_matrix, axis=0)
 })
 
-# Save both DataFrames into CSV
+# 保存结果
 os.makedirs('./results', exist_ok=True)
-df_eval.to_csv('./results/reinforce_DQN_score.csv', index=False)
-df_results.to_csv('./results/reinforce_DQN_results.csv', index=False)
-
-print(f"\nResults saved to ./results/")
-print(f"\nSummary:")
-print(df_results[['avg_reward']].agg(['mean', 'max']))
-
-total_time = time.time() - start_time
-print(f"\nTotal Runtime: {total_time:.2f} s ({(total_time/60):.2f} min)")
+df_eval.to_csv('./results/eval_greedy_scores.csv', index=False)
+df_train.to_csv('./results/train_returns.csv', index=False)
+print("数据已保存至 ./results/ 目录")
