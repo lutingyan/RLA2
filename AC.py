@@ -18,7 +18,7 @@ state_dim = env.observation_space.shape[0]
 action_dim = env.action_space.n
 
 lr_actor = 1e-4
-lr_critic = 0.001
+lr_critic = 0.0005
 gamma = 0.99
 hidden_dim = 128
 max_steps = int(1e6)
@@ -187,7 +187,7 @@ if __name__ == "__main__":
         'std_reward': std_eval_scores
     })
     os.makedirs('./results', exist_ok=True)
-    df_eval.to_csv('./results/reinforce_ac_score.csv', index=False)
+    df_eval.to_csv('./results/reinforce_ac_0.0005_score.csv', index=False)
     
     df = pd.DataFrame({
         'steps': all_eval_steps[0],  # Use eval_steps as the steps
@@ -196,7 +196,7 @@ if __name__ == "__main__":
     })
 
     os.makedirs('./results', exist_ok=True)
-    df.to_csv('./results/reinforce_ac_results.csv', index=False)
+    df.to_csv('./results/reinforce_ac_0.0005_results.csv', index=False)
 
     print("\nResults saved to ./results/")
     print("\nSummary:")
