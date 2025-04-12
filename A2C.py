@@ -58,7 +58,7 @@ class Critic(nn.Module):
 
 
 
-def compute_advantages_and_returns(rewards, values, dones, gamma=0.99, n_steps=5):
+def compute_advantages_and_returns(rewards, values, dones, gamma=0.99, n_steps=10):
     advantages = []
     returns = []
     T = len(rewards)
